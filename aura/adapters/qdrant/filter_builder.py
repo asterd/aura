@@ -19,27 +19,25 @@ def build_retrieval_filter(
     ]
 
     if acl_mode == "source_acl_enforced":
+        source_acl_should: list[models.Condition] = [
+            models.FieldCondition(key="acl_allow_users", match=models.MatchValue(value=identity.okta_sub)),
+        ]
+        if identity.group_ids:
+            source_acl_should.append(
+                models.FieldCondition(
+                    key="acl_allow_groups",
+                    match=models.MatchAny(any=[str(group_id) for group_id in identity.group_ids]),
+                )
+            )
+
         should: list[models.Condition] = [
             models.FieldCondition(key="source_acl_mode", match=models.MatchValue(value="space_acl_only")),
             models.Filter(
-                must=[
-                    models.FieldCondition(key="source_acl_mode", match=models.MatchValue(value="source_acl_enforced")),
-                    models.FieldCondition(key="acl_allow_users", match=models.MatchValue(value=identity.okta_sub)),
-                ]
+                must=[models.FieldCondition(key="source_acl_mode", match=models.MatchValue(value="source_acl_enforced"))],
+                should=source_acl_should,
+                min_should=models.MinShould(conditions=source_acl_should, min_count=1),
             ),
         ]
-        if identity.group_ids:
-            should.append(
-                models.Filter(
-                    must=[
-                        models.FieldCondition(key="source_acl_mode", match=models.MatchValue(value="source_acl_enforced")),
-                        models.FieldCondition(
-                            key="acl_allow_groups",
-                            match=models.MatchAny(any=[str(group_id) for group_id in identity.group_ids]),
-                        ),
-                    ]
-                )
-            )
         must_not: list[models.Condition] = [
             models.FieldCondition(key="acl_deny_users", match=models.MatchValue(value=identity.okta_sub))
         ]

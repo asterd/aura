@@ -9,7 +9,7 @@ import httpx
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import Depends, FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from redis.asyncio import from_url as redis_from_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,11 +24,13 @@ from apps.api.routers.spaces import router as spaces_router
 from aura.adapters.db.session import AsyncSessionLocal
 from aura.domain.contracts import RequestContext, UserIdentity
 from aura.domain.models import User
+from aura.utils.observability import get_gauge_value
 
 
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     components: dict[str, Literal["ok", "degraded", "down"]]
+    metrics: dict[str, float] = Field(default_factory=dict)
 
 
 class MeResponse(BaseModel):
@@ -120,7 +122,13 @@ async def health() -> HealthResponse:
     }
     results = {name: await check for name, check in component_checks.items()}
     status: Literal["ok", "degraded"] = "ok" if all(value == "ok" for value in results.values()) else "degraded"
-    return HealthResponse(status=status, components=results)
+    return HealthResponse(
+        status=status,
+        components=results,
+        metrics={
+            "aura.datasource.stale_count": get_gauge_value("aura.datasource.stale_count"),
+        },
+    )
 
 
 @app.get(f"{settings.api_prefix}/me", response_model=MeResponse)

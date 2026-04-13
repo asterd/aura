@@ -57,9 +57,11 @@ packages = [
     "aura",
     "aura.adapters",
     "aura.adapters.db",
+    "aura.adapters.connectors",
     "aura.adapters.embeddings",
     "aura.adapters.qdrant",
     "aura.adapters.s3",
     "aura.domain",
     "aura.services",
+    "aura.utils",
 ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,7 +18,7 @@ from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.adapters.embeddings.litellm import LiteLLMEmbeddingClient
 from aura.adapters.qdrant.setup import QdrantChunkStore
 from aura.adapters.s3.client import S3Client
-from aura.domain.contracts import JobPayload
+from aura.domain.contracts import JobPayload, LoadedDocument, NormalizedACL
 
 
 @dataclass(slots=True)
@@ -55,34 +56,37 @@ class IngestionService:
                 await set_tenant_rls(session, payload.tenant_id)
                 document, datasource, space, embedding_profile = await self._load_document_bundle(session, document_id)
 
-                original_key = self._require_ref(document.external_id)
+                original_key = self._resolve_original_ref(document, datasource)
                 original_bytes = await self._s3.download_file(settings.s3_bucket_name, original_key)
                 await self._persist_document_status(session, payload.tenant_id, document, "fetched")
 
-                canonical_text = await self._parse_document(document.source_path, document.content_type, original_bytes)
+                canonical_text, acl_override = await self._parse_document(
+                    datasource=datasource,
+                    source_path=document.source_path,
+                    content_type=document.content_type,
+                    data=original_bytes,
+                )
                 await self._persist_document_status(session, payload.tenant_id, document, "parsed")
 
                 canonical_bytes = canonical_text.encode("utf-8")
                 version_hash = hashlib.sha256(canonical_bytes).hexdigest()
                 payload.job_key = f"ingest:{document.id}:{version_hash}"
                 existing_version = await self._find_existing_version(session, document.id, version_hash)
-                if existing_version is not None:
-                    document.current_version_id = existing_version.id
-                    await self._persist_document_status(session, payload.tenant_id, document, "active")
-                    return
-
-                canonical_key = f"canonical/{payload.tenant_id}/{document.id}/{version_hash}.txt"
-                await self._s3.upload_file(settings.s3_bucket_name, canonical_key, canonical_bytes, "text/plain")
-                version = DocumentVersion(
-                    document_id=document.id,
-                    tenant_id=payload.tenant_id,
-                    version_hash=version_hash,
-                    s3_canonical_ref=canonical_key,
-                    s3_original_ref=original_key,
-                )
-                session.add(version)
-                await session.flush()
-                await self._persist_document_status(session, payload.tenant_id, document, "canonicalized")
+                if existing_version is None:
+                    canonical_key = f"canonical/{payload.tenant_id}/{document.id}/{version_hash}.txt"
+                    await self._s3.upload_file(settings.s3_bucket_name, canonical_key, canonical_bytes, "text/plain")
+                    version = DocumentVersion(
+                        document_id=document.id,
+                        tenant_id=payload.tenant_id,
+                        version_hash=version_hash,
+                        s3_canonical_ref=canonical_key,
+                        s3_original_ref=original_key,
+                    )
+                    session.add(version)
+                    await session.flush()
+                    await self._persist_document_status(session, payload.tenant_id, document, "canonicalized")
+                else:
+                    version = existing_version
 
                 chunks = self._split_text(canonical_text, embedding_profile.chunk_size, embedding_profile.chunk_overlap)
                 vectors = await self._embeddings.embed_texts(
@@ -104,6 +108,7 @@ class IngestionService:
                         chunk=chunk,
                         version_hash=version_hash,
                         updated_at=updated_at,
+                        acl=acl_override,
                     )
                     self._qdrant.validate_payload(payload_dict)
                     point_id = str(uuid5(NAMESPACE_URL, f"{version.id}:{chunk.chunk_index}:{chunk.char_start}:{chunk.char_end}"))
@@ -182,7 +187,28 @@ class IngestionService:
             document.updated_at = datetime.now(UTC)
             await session.commit()
 
-    async def _parse_document(self, source_path: str, content_type: str, data: bytes) -> str:
+    async def _parse_document(
+        self,
+        *,
+        datasource: Datasource,
+        source_path: str,
+        content_type: str,
+        data: bytes,
+    ) -> tuple[str, NormalizedACL | None]:
+        if datasource.connector_type != "file_upload":
+            loaded = LoadedDocument.model_validate(json.loads(data.decode("utf-8")))
+            if loaded.raw_text:
+                return self._canonicalize_text(loaded.raw_text), loaded.acl
+            if loaded.raw_bytes_ref:
+                raw_bytes = await self._s3.download_file(settings.s3_bucket_name, loaded.raw_bytes_ref)
+                text = await self._parse_binary_document(source_path, content_type, raw_bytes)
+                return text, loaded.acl
+            raise ValueError("Connector document is missing both raw_text and raw_bytes_ref.")
+
+        text = await self._parse_binary_document(source_path, content_type, data)
+        return text, None
+
+    async def _parse_binary_document(self, source_path: str, content_type: str, data: bytes) -> str:
         suffix = Path(source_path).suffix.lower()
         try:
             if suffix == ".pdf" or content_type == "application/pdf":
@@ -253,8 +279,13 @@ class IngestionService:
         chunk: ParsedChunk,
         version_hash: str,
         updated_at: str,
+        acl: NormalizedACL | None,
     ) -> dict[str, object]:
         chunk_id = str(uuid5(NAMESPACE_URL, f"{version.id}:{chunk.chunk_index}:{chunk.char_start}:{chunk.char_end}"))
+        effective_acl = acl
+        source_acl_mode = "space_acl_only" if datasource.connector_type == "file_upload" else space.source_access_mode
+        if source_acl_mode == "space_acl_only":
+            effective_acl = None
         return {
             "tenant_id": str(document.tenant_id),
             "space_id": str(document.space_id),
@@ -274,17 +305,24 @@ class IngestionService:
             "tags": [],
             "hash": f"sha256:{version_hash}",
             "updated_at": updated_at,
-            "source_acl_mode": "space_acl_only" if datasource.connector_type == "file_upload" else space.source_access_mode,
-            "acl_allow_users": [],
-            "acl_allow_groups": [],
-            "acl_deny_users": [],
-            "acl_deny_groups": [],
-            "acl_inherited": True,
+            "source_acl_mode": source_acl_mode,
+            "acl_allow_users": list(effective_acl.allow_users) if effective_acl else [],
+            "acl_allow_groups": [str(group_id) for group_id in effective_acl.allow_groups] if effective_acl else [],
+            "acl_deny_users": list(effective_acl.deny_users) if effective_acl else [],
+            "acl_deny_groups": [str(group_id) for group_id in effective_acl.deny_groups] if effective_acl else [],
+            "acl_inherited": bool(effective_acl.inherited) if effective_acl else True,
             "page_number": chunk.page_number,
             "section_title": chunk.section_title,
             "char_start": chunk.char_start,
             "char_end": chunk.char_end,
         }
+
+    def _resolve_original_ref(self, document: Document, datasource: Datasource) -> str:
+        if datasource.connector_type == "file_upload":
+            return self._require_ref(document.external_id)
+        external_id = self._require_ref(document.external_id)
+        digest = hashlib.sha256(external_id.encode("utf-8")).hexdigest()
+        return f"connector-cache/{document.tenant_id}/{datasource.id}/{digest}.json"
 
     def _require_ref(self, ref: str | None) -> str:
         if not ref:

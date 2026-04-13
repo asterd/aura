@@ -13,6 +13,7 @@ from apps.api.config import settings
 from aura.adapters.db.models import Datasource, Document
 from aura.adapters.s3.client import S3Client
 from aura.domain.contracts import JobPayload, RequestContext
+from aura.services.connector_sync_service import ConnectorSyncService
 from aura.services.space_service import SpaceService
 
 
@@ -24,9 +25,16 @@ class UploadResult:
 
 
 class DatasourceService:
-    def __init__(self, *, s3_client: S3Client | None = None, space_service: SpaceService | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        s3_client: S3Client | None = None,
+        space_service: SpaceService | None = None,
+        connector_sync_service: ConnectorSyncService | None = None,
+    ) -> None:
         self._s3 = s3_client or S3Client()
         self._space_service = space_service or SpaceService()
+        self._connector_sync_service = connector_sync_service or ConnectorSyncService()
 
     async def upload(
         self,
@@ -99,3 +107,21 @@ class DatasourceService:
             )
         finally:
             await redis.aclose()
+
+    async def enqueue_connector_sync(
+        self,
+        *,
+        session: AsyncSession,
+        context: RequestContext,
+        datasource_id: UUID,
+    ) -> UUID:
+        datasource = await session.get(Datasource, datasource_id)
+        if datasource is None or datasource.tenant_id != context.tenant_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Datasource not found.")
+        payload = JobPayload(
+            tenant_id=context.tenant_id,
+            job_key=f"sync:{datasource_id}",
+            requested_by_user_id=context.identity.user_id,
+            trace_id=context.trace_id,
+        )
+        return await self._connector_sync_service.enqueue_sync(payload=payload, datasource_id=datasource_id)

@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from apps.api.config import settings
 from aura.adapters.db.session import set_tenant_rls
-from aura.domain.models import User
+from aura.domain.models import Group, User
 from aura.services.identity import JwksCache
 
 # ---------------------------------------------------------------------------
@@ -274,6 +274,46 @@ async def insert_test_user(*, tenant_id: UUID, okta_sub: str | None = None) -> U
     return User(id=user_id, tenant_id=tenant_id, okta_sub=sub, email=f"{sub}@example.com", roles=[], synced_at=now, created_at=now, updated_at=now)
 
 
+async def insert_test_group(*, tenant_id: UUID, external_id: str, display_name: str | None = None) -> Group:
+    owner_url = TEST_DATABASE_URL.replace("://aura_app:aura_app@", "://aura_service:aura_service@", 1)
+    owner_engine = create_async_engine(owner_url)
+    group_id = uuid4()
+    now = datetime.now(UTC)
+    name = display_name or external_id
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO groups (id, tenant_id, external_id, display_name, synced_at, created_at) "
+                "VALUES (:id, :tid, :external_id, :display_name, :now, :now) ON CONFLICT DO NOTHING"
+            ),
+            {
+                "id": group_id,
+                "tid": tenant_id,
+                "external_id": external_id,
+                "display_name": name,
+                "now": now,
+            },
+        )
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT id, tenant_id, external_id, display_name, synced_at, created_at "
+                    "FROM groups WHERE tenant_id = :tid AND external_id = :external_id"
+                ),
+                {"tid": tenant_id, "external_id": external_id},
+            )
+        ).mappings().one()
+    await owner_engine.dispose()
+    return Group(
+        id=row["id"],
+        tenant_id=row["tenant_id"],
+        external_id=row["external_id"],
+        display_name=row["display_name"],
+        synced_at=row["synced_at"],
+        created_at=row["created_at"],
+    )
+
+
 async def wait_for_job(job_id: UUID, timeout: float = 30.0) -> None:
     redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
@@ -286,6 +326,18 @@ async def wait_for_job(job_id: UUID, timeout: float = 30.0) -> None:
             from apps.worker.jobs.ingestion import ingest_document_job
 
             await ingest_document_job({"job_try": job_info.job_try}, *job_info.args)
+            return
+
+        if job_info.function == "connector_sync_job":
+            from apps.worker.jobs.ingestion import connector_sync_job
+
+            await connector_sync_job({"job_try": job_info.job_try}, *job_info.args)
+            return
+
+        if job_info.function == "identity_sync_job":
+            from apps.worker.jobs.identity_sync import identity_sync_job
+
+            await identity_sync_job({"job_try": job_info.job_try}, *job_info.args)
             return
 
         raise AssertionError(f"Unsupported test job function: {job_info.function}")

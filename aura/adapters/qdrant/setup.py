@@ -70,25 +70,31 @@ class QdrantChunkStore:
 
     async def replace_document_chunks(self, document_id: UUID, points: list[models.PointStruct]) -> None:
         def _replace() -> None:
-            self._client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="document_id",
-                                match=models.MatchValue(value=str(document_id)),
-                            )
-                        ]
-                    )
-                ),
-                wait=True,
-            )
+            self._delete_document_chunks(document_id)
             self._client.upsert(collection_name=self.collection_name, points=points, wait=True)
 
         await asyncio.to_thread(_replace)
+
+    async def delete_document_chunks(self, document_id: UUID) -> None:
+        await asyncio.to_thread(self._delete_document_chunks, document_id)
 
     def validate_payload(self, payload: dict[str, object]) -> None:
         missing_fields = [field for field in self.required_payload_fields if field not in payload]
         if missing_fields:
             raise ValueError(f"Qdrant payload missing required fields: {', '.join(missing_fields)}")
+
+    def _delete_document_chunks(self, document_id: UUID) -> None:
+        self._client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="document_id",
+                            match=models.MatchValue(value=str(document_id)),
+                        )
+                    ]
+                )
+            ),
+            wait=True,
+        )

@@ -180,6 +180,30 @@ class LoadedDocument(BaseModel):
     is_deleted: bool = False
 
 
+class CredentialType(str, Enum):
+    oauth2_bearer = "oauth2_bearer"
+    api_key = "api_key"
+    service_account_json = "service_account_json"
+    client_credentials = "client_credentials"
+    basic = "basic"
+
+
+class ConnectorCredentials(BaseModel):
+    credential_type: CredentialType
+    secret_ref: str
+    scopes: list[str] = Field(default_factory=list)
+    tenant_domain: str | None = None
+    extra: dict = Field(default_factory=dict)
+
+
+class ResolvedCredentials(BaseModel):
+    credential_type: CredentialType
+    token_or_key: str
+    scopes: list[str] = Field(default_factory=list)
+    tenant_domain: str | None = None
+    extra: dict = Field(default_factory=dict)
+
+
 class Citation(BaseModel):
     citation_id: str
     document_id: UUID
@@ -276,3 +300,14 @@ class JobPayload(BaseModel):
     job_key: str
     requested_by_user_id: UUID | None = None
     trace_id: str | None = None
+
+
+class IdentitySyncResult(BaseModel):
+    tenant_id: UUID
+    users_seen: int
+    users_updated: int
+    groups_seen: int
+    groups_updated: int
+    unmapped_users: int
+    partial_failures: int
+    completed_at: datetime
