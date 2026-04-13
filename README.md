@@ -66,6 +66,15 @@ Regole:
 Prima di iniziare: elenca i file che leggerai e conferma di aver capito i task obbligatori.
 ```
 
+## Promp ti verifica step
+
+Ho fatto implementare quanto indicato nel prompt che ti incollo di seguito. 
+Mi verifichi che l'implementazione fatta sia corretta? 
+NB. la modifica non è ancora committata
+"
+<prompt here>
+"
+
 ---
 
 ## Prompt specifici per ogni fase

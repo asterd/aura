@@ -1,0 +1,45 @@
+# macOS / filesystem noise
+.DS_Store
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging / build artifacts
+build/
+dist/
+site/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# Test and runtime outputs
+coverage.xml
+*.cover
+*.log
+
+# IDE/editor local state
+.idea/
+.vscode/

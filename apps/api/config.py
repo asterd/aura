@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     s3_secure: bool = Field(default=False, alias="S3_SECURE")
     litellm_base_url: AnyHttpUrl = Field(alias="LITELLM_BASE_URL")
     okta_jwks_url: AnyHttpUrl = Field(alias="OKTA_JWKS_URL")
+    okta_issuer_override: AnyHttpUrl | None = Field(default=None, alias="OKTA_ISSUER")
+    okta_audience: str = Field(default="api://default", alias="OKTA_AUDIENCE")
     langfuse_base_url: AnyHttpUrl = Field(alias="LANGFUSE_BASE_URL")
     langfuse_secret_key: SecretStr = Field(alias="LANGFUSE_SECRET_KEY")
     postgres_connect_timeout_s: float = 5.0
@@ -40,6 +42,15 @@ class Settings(BaseSettings):
     @cached_property
     def sync_database_url(self) -> str:
         return self.database_url.replace("+asyncpg", "", 1)
+
+    @cached_property
+    def okta_issuer(self) -> str:
+        if self.okta_issuer_override:
+            return str(self.okta_issuer_override)
+        jwks_url = str(self.okta_jwks_url).rstrip("/")
+        if jwks_url.endswith("/v1/keys"):
+            return jwks_url[: -len("/v1/keys")]
+        return jwks_url
 
 
 settings = Settings()
