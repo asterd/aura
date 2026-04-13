@@ -18,6 +18,7 @@ from sqlalchemy import text
 from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context, identity_middleware
 from apps.api.dependencies.db import get_db_session
+from apps.api.routers.chat import router as chat_router
 from apps.api.routers.datasources import router as datasources_router
 from apps.api.routers.spaces import router as spaces_router
 from aura.adapters.db.session import AsyncSessionLocal
@@ -38,6 +39,7 @@ class MeResponse(BaseModel):
 
 app = FastAPI(title="AURA API")
 app.middleware("http")(identity_middleware)
+app.include_router(chat_router)
 app.include_router(spaces_router)
 app.include_router(datasources_router)
 

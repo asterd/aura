@@ -118,6 +118,97 @@ class LoadedDocument(BaseModel):
     is_deleted: bool = False
 
 
+class Citation(BaseModel):
+    citation_id: str
+    document_id: UUID
+    document_version_id: UUID
+    chunk_id: UUID
+    title: str
+    source_system: str
+    source_path: str
+    source_url: str | None = None
+    page_or_section: str | None = None
+    score: float
+    snippet: str
+
+
+class RetrievalRequest(BaseModel):
+    query: str
+    space_ids: list[UUID]
+    conversation_id: UUID | None = None
+    retrieval_profile_id: UUID | None = None
+    query_rewrite_enabled: bool | None = None
+
+
+class RetrievalResult(BaseModel):
+    query: str
+    context_blocks: list[str]
+    citations: list[Citation]
+    retrieval_profile_id: UUID
+    total_candidates: int
+    used_candidates: int
+
+
+class ChatRequest(BaseModel):
+    conversation_id: UUID | None = None
+    message: str
+    space_ids: list[UUID]
+    additional_instructions: str | None = None
+    active_agent_ids: list[UUID] = Field(default_factory=list)
+    retrieval_profile_id: UUID | None = None
+    model_override: str | None = None
+    stream: bool = False
+
+
+class ChatResponse(BaseModel):
+    conversation_id: UUID
+    message_id: UUID
+    content: str
+    citations: list[Citation]
+    trace_id: str
+
+
+class ChatStreamEventToken(BaseModel):
+    type: Literal["token"]
+    content: str
+
+
+class ChatStreamEventCitation(BaseModel):
+    type: Literal["citation"]
+    citation: Citation
+
+
+class ChatStreamEventDone(BaseModel):
+    type: Literal["done"]
+    message_id: UUID
+    trace_id: str
+
+
+class ChatStreamEventError(BaseModel):
+    type: Literal["error"]
+    code: str
+    message: str
+
+
+ChatStreamEvent = ChatStreamEventToken | ChatStreamEventCitation | ChatStreamEventDone | ChatStreamEventError
+
+
+class DetectedEntity(BaseModel):
+    entity_type: str
+    start: int
+    end: int
+    score: float
+    value_preview: str | None = None
+
+
+class PiiTransformResult(BaseModel):
+    mode: str
+    transformed_text: str
+    detected_entities: list[DetectedEntity]
+    mapping_refs: list[str] = Field(default_factory=list)
+    had_transformations: bool
+
+
 class JobPayload(BaseModel):
     tenant_id: UUID
     job_key: str

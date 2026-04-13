@@ -262,6 +262,7 @@ class IngestionService:
             "document_version_id": str(version.id),
             "chunk_id": chunk_id,
             "chunk_index": chunk.chunk_index,
+            "chunk_text": chunk.text,
             "source_id": str(datasource.id),
             "source_system": datasource.connector_type,
             "source_path": document.source_path,

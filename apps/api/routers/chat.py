@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+import json
+from uuid import UUID
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from apps.api.dependencies.auth import get_request_context
+from apps.api.dependencies.db import get_db_session
+from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
+from aura.domain.contracts import ChatRequest, ChatResponse, RequestContext, RetrievalRequest, RetrievalResult
+from aura.services.chat import ChatService
+from aura.services.retrieval import RetrievalService
+
+
+router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+retrieval_service = RetrievalService()
+chat_service = ChatService(retrieval_service=retrieval_service)
+
+
+class RetrieveApiRequest(BaseModel):
+    query: str
+    space_ids: list[UUID]
+    conversation_id: UUID | None = None
+    retrieval_profile_id: UUID | None = None
+
+
+class RetrieveApiResponse(BaseModel):
+    result: RetrievalResult
+    trace_id: str
+
+
+class RespondApiRequest(ChatRequest):
+    stream: bool = False
+
+
+class StreamApiRequest(ChatRequest):
+    stream: bool = True
+
+
+@router.post("/retrieve", response_model=RetrieveApiResponse)
+async def retrieve(
+    payload: RetrieveApiRequest,
+    context: RequestContext = Depends(get_request_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> RetrieveApiResponse:
+    result = await retrieval_service.retrieve(
+        session=session,
+        request=RetrievalRequest(**payload.model_dump()),
+        context=context,
+    )
+    return RetrieveApiResponse(result=result, trace_id=context.trace_id)
+
+
+@router.post("/respond", response_model=ChatResponse)
+async def respond(
+    payload: RespondApiRequest,
+    context: RequestContext = Depends(get_request_context),
+    session: AsyncSession = Depends(get_db_session),
+) -> ChatResponse:
+    return await chat_service.respond(session=session, request=ChatRequest(**payload.model_dump()), context=context)
+
+
+@router.post("/stream")
+async def stream(
+    payload: StreamApiRequest,
+    context: RequestContext = Depends(get_request_context),
+) -> StreamingResponse:
+    async def event_source():
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await set_tenant_rls(session, context.tenant_id)
+                async for event in chat_service.respond_stream(
+                    session=session,
+                    request=ChatRequest(**payload.model_dump()),
+                    context=context,
+                ):
+                    yield f"data: {json.dumps(event.model_dump(mode='json'))}\n\n"
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")
