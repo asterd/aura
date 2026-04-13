@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import jwt
@@ -23,6 +24,22 @@ from aura.services.identity import JwksCache
 # this can be overridden in CI.
 # ---------------------------------------------------------------------------
 import os
+
+
+def _load_dotenv() -> None:
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key, value)
+
+
+_load_dotenv()
 
 TEST_DATABASE_URL: str = os.environ.get(
     "TEST_DATABASE_URL",
