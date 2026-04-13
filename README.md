@@ -19,6 +19,10 @@ docs/
     05_api.md                      ← API surface e schemas (§21)
     06_ops.md                      ← Jobs, observability, degraded modes, DoD (§22-29)
     07_db_schema.md                ← Schema DB completo con RLS (§31)
+    08_ux_architecture.md          ← UX: threading, streaming, composer, sidebar, artifact viewer (§35)
+    09_triggered_agents.md         ← Triggered & autonomous agents, cron/event, webhook (§36)
+    10_mcp_bridge.md               ← MCP Bridge: AURA server + skill mcp_client (§37)
+    11_agent_chat_integration.md   ← Agent-in-chat: @mention, AgentChatService, stream events (§38)
   phases/
     phase_0_foundation.md          ← Infra, settings, health, ARQ skeleton
     phase_1_identity.md            ← JWT, UserIdentity, RLS, /me
@@ -27,9 +31,10 @@ docs/
     phase_4_retrieval_chat.md      ← RetrievalService, ChatService, SSE
     phase_5_policies_pii.md        ← ModelPolicy, PiiPolicy, Presidio
     phase_6_connectors.md          ← ConnectorWrapper, SecretStore, identity sync
-    phase_7_agents.md              ← Agent registry, RuntimeLoader, AgentService
-    phase_8_skills_sandbox.md      ← SandboxProvider, Docker, skill run
+    phase_7_agents.md              ← Agent registry, RuntimeLoader, AgentService + triggered/chat
+    phase_8_skills_sandbox.md      ← SandboxProvider, Docker, skill run + MCP Bridge
     phase_9_ops.md                 ← Langfuse, OTel, degraded modes, critical tests
+    phase_10_ui.md                 ← Next.js shell, chat, spaces, agents UI
 ```
 
 ---
@@ -66,10 +71,10 @@ Regole:
 Prima di iniziare: elenca i file che leggerai e conferma di aver capito i task obbligatori.
 ```
 
-## Promp ti verifica step
+## Prompt di verifica step
 
-Ho fatto implementare quanto indicato nel prompt che ti incollo di seguito. 
-Mi verifichi che l'implementazione fatta sia corretta? 
+Ho fatto implementare quanto indicato nel prompt che ti incollo di seguito.
+Mi verifichi che l'implementazione fatta sia corretta?
 NB. la modifica non è ancora committata
 "
 <prompt here>
@@ -232,10 +237,10 @@ La fase è done quando test_credentials_never_serialized e test_stale_acl_after_
 
 ---
 
-### Fase 7 — Agent Registry
+### Fase 7 — Agents
 
 ```
-Implementa la Fase 7 di AURA (Agent Registry).
+Implementa la Fase 7 di AURA (Agents).
 
 Prerequisito: Fase 6 verde.
 
@@ -247,29 +252,55 @@ Leggi questi file:
 3. docs/spec/01_contracts.md (§8.5 AgentDeps, AgentRunRequest, AgentRunResult)
 4. docs/spec/04_agents.md (§17.3 run_agent pseudocode; §17.5 reference implementation; §18 registry flow; §19.5 RuntimeLoader contract)
 5. docs/spec/07_db_schema.md (§31.4: agent_packages, agent_versions, agent_runs)
+6. docs/spec/09_triggered_agents.md (§36 completo — triggered & autonomous)
+7. docs/spec/11_agent_chat_integration.md (§38 completo — @mention, AgentChatService)
 
-Il pseudocodice di AgentService.run_agent (§17.3) è normativo — rispetta l'ordine dei 10 step.
-RuntimeLoader: usa importlib, mai exec()/eval().
-La fase è done quando test_non_published_agent_not_executable e test_artifact_sha256_verified passano.
+Scope di questa fase:
+- AgentService.run_agent (pseudocodice §17.3 — 10 step in ordine)
+- RuntimeLoader via importlib (mai exec/eval)
+- RegistryService + publish flow (§18)
+- TriggerSchedulerService e EventDispatcherService (§36) con migration agent_trigger_registrations
+- AgentChatService con @mention parsing e streaming eventi agent_running/agent_done (§38)
+- Nuovi contratti in contracts.py: CronTrigger, EventTrigger, InternalEvent, AgentInvocation, AgentChatInput
+- Endpoint POST /api/v1/webhooks/{agent_name}/inbound (HMAC-SHA256)
+- Endpoint GET /api/v1/conversations e /api/v1/conversations/{id}
+
+CRITICO: RuntimeLoader usa importlib, mai exec()/eval().
+CRITICO: TriggerSchedulerService NON apre sessioni autonome — riceve session iniettata.
+CRITICO: AgentChatService NON genera testo — delega sempre a ChatService.
+CRITICO: run agente falliti NON bloccano la risposta — catturati con return_exceptions=True.
+La fase è done quando test_non_published_agent_not_executable, test_cron_trigger_fires_on_schedule e test_agent_mention_invokes_agent passano.
 ```
 
 ---
 
-### Fase 8 — Skills e Sandbox
+### Fase 8 — Skills, Sandbox e MCP
 
 ```
-Implementa la Fase 8 di AURA (Skills e Sandbox).
+Implementa la Fase 8 di AURA (Skills, Sandbox e MCP).
 
 Prerequisito: Fase 7 verde.
 
 Leggi questi file:
 1. CLAUDE.md
 2. docs/phases/phase_8_skills_sandbox.md
-3. docs/spec/01_contracts.md (§8.11 SandboxPolicy)
+3. docs/spec/01_contracts.md (§8.11 SandboxPolicy; §8.12 ResolvedCredentials)
 4. docs/spec/04_agents.md (§19: SandboxProvider Protocol; §19.3 SandboxInput/SandboxResult; §19.4 DockerSandboxProvider reference impl)
+5. docs/spec/10_mcp_bridge.md (§37 completo — skill mcp_client e AURA MCP Server)
 
-La SandboxPolicy default ha network_egress=none — il container non ha accesso alla rete.
-La fase è done quando test_sandbox_network_blocked e test_sandbox_timeout_respected passano.
+Scope di questa fase:
+- DockerSandboxProvider (network_egress=none di default, memory limit, timeout)
+- RuntimeLoader SHA256 verify + per-run temp dir cleanup
+- Skill type mcp_client nel manifest validator
+- McpBridgeAdapter Protocol + implementazione HTTP/SSE client
+- AgentDeps esteso con mcp_adapters: dict[str, McpBridgeAdapter]
+- Nuovi contratti in contracts.py: McpToolDefinition, McpToolResult
+- AURA MCP Server: endpoint /mcp/v1/sse con tool aura_retrieve, aura_chat, aura_agent_run, aura_list_spaces, aura_list_agents
+
+CRITICO: la skill mcp_client (outbound) va implementata PRIMA del MCP Server (inbound).
+CRITICO: McpBridgeAdapter NON viene istanziato nei router — sempre via dependency injection.
+CRITICO: il MCP Server rispetta RLS e policy — nessun bypass.
+La fase è done quando test_sandbox_network_blocked, test_sandbox_timeout_respected e test_mcp_server_rls_enforced passano.
 ```
 
 ---
@@ -289,6 +320,38 @@ Leggi questi file:
 
 La fase è done solo quando TUTTI e 12 i critical failure tests di §28.2 passano.
 Questi test non sono opzionali — sono il gate finale di produzione.
+```
+
+---
+
+### Fase 10 — UI
+
+```
+Implementa la Fase 10 di AURA (UI).
+
+Prerequisito: Fase 4 verde (chat/stream funziona). Le funzionalità avanzate (agenti, artifact) richiedono Fase 7 verde.
+Stack: Next.js 15, React 19, Zustand (state), Tailwind CSS.
+
+Leggi questi file:
+1. CLAUDE.md
+2. docs/phases/phase_10_ui.md
+3. docs/spec/08_ux_architecture.md (§35 completo)
+4. docs/spec/01_contracts.md (§8.3 ChatStreamEvent — tutti i tipi inclusi agent_running e agent_done)
+5. docs/spec/05_api.md (tutti gli endpoint UI-facing: /me, /chat/stream, /conversations, /agents, /datasources/upload)
+
+Scope di questa fase:
+- Layout con sidebar (thread history, spaces, agents)
+- Login/redirect JWT
+- Composer con @agent-name e #space-name mention, drag-and-drop upload
+- MessageBubble streaming: PENDING → STREAMING → DONE | ERROR, debounce 50ms, retry SSE
+- CitationCard inline
+- Indicatori agent_running / agent_done tra invio e token streaming
+- ArtifactRenderer (markdown, code, csv, json, pdf_preview, image, unknown)
+
+CRITICO: nessun dato sensibile in localStorage/sessionStorage.
+CRITICO: il Composer NON invia durante STREAMING.
+CRITICO: artifact sempre via URL firmato S3 — mai base64 nel body.
+La fase è done quando chat streaming end-to-end funziona con citations, e @mention agente produce artifact renderizzato.
 ```
 
 ---

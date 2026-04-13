@@ -19,6 +19,10 @@ Per ogni fase, leggere SOLO i file elencati nella sezione "File da leggere" del 
 | `docs/spec/05_api.md` | API surface e schemas pubblici (§21) |
 | `docs/spec/06_ops.md` | Jobs, observability, degraded modes, anti-pattern, DoD (§22-29) |
 | `docs/spec/07_db_schema.md` | Schema DB completo, RLS SQL, ruoli (§31) |
+| `docs/spec/08_ux_architecture.md` | UX: threading, streaming, composer, sidebar, artifact viewer, AgentChatService (§35) |
+| `docs/spec/09_triggered_agents.md` | Triggered & autonomous agents, cron/event triggers, webhook inbound (§36) |
+| `docs/spec/10_mcp_bridge.md` | MCP Bridge: AURA come MCP Server + skill mcp_client outbound (§37) |
+| `docs/spec/11_agent_chat_integration.md` | Agent-in-chat: @mention, AgentChatService, streaming eventi agente (§38) |
 
 ---
 
