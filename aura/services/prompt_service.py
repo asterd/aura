@@ -57,10 +57,12 @@ class PromptService:
         spaces = (
             await session.execute(select(KnowledgeSpace).where(KnowledgeSpace.id.in_(request.space_ids)))
         ).scalars().all()
-        tone_prompt = await self._resolve_tenant_tone_prompt(session, context.tenant_id, spaces)
+        spaces_by_id = {space.id: space for space in spaces}
+        ordered_spaces = [spaces_by_id[space_id] for space_id in request.space_ids if space_id in spaces_by_id]
+        tone_prompt = await self._resolve_tenant_tone_prompt(session, context.tenant_id, ordered_spaces)
         space_instructions = "\n\n".join(
             space.system_instructions.strip()
-            for space in spaces
+            for space in ordered_spaces
             if space.system_instructions and space.system_instructions.strip()
         )
         context_block = "\n\n".join(retrieval_result.context_blocks).strip()

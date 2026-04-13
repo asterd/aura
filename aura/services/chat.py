@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+import logging
+
+from fastapi import HTTPException, status
+from sqlalchemy import select
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aura.adapters.db.models import KnowledgeSpace
 from aura.domain.contracts import (
     ChatRequest,
     ChatResponse,
@@ -18,8 +23,12 @@ from aura.domain.contracts import (
 from aura.services.conversation_service import ConversationService
 from aura.services.llm_service import LlmService
 from aura.services.pii_service import PiiService
+from aura.services.policy_service import PolicyService
 from aura.services.prompt_service import PromptService
 from aura.services.retrieval import RetrievalService
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -31,12 +40,14 @@ class ChatService:
         pii_service: PiiService | None = None,
         llm_service: LlmService | None = None,
         conversation_service: ConversationService | None = None,
+        policy_service: PolicyService | None = None,
     ) -> None:
         self._retrieval = retrieval_service or RetrievalService()
         self._prompt = prompt_service or PromptService()
         self._pii = pii_service or PiiService()
         self._llm = llm_service or LlmService()
         self._conversations = conversation_service or ConversationService()
+        self._policies = policy_service or PolicyService()
 
     async def respond(
         self,
@@ -45,6 +56,7 @@ class ChatService:
         request: ChatRequest,
         context: RequestContext,
     ) -> ChatResponse:
+        spaces = await self._load_spaces(session, request.space_ids)
         retrieval_result = await self._retrieval.retrieve(
             session=session,
             request=RetrievalRequest(
@@ -61,24 +73,58 @@ class ChatService:
             request=request,
             retrieval_result=retrieval_result,
         )
-        input_transform = await self._pii.transform_input_if_needed(session=session, context=context, text=request.message)
+        model_policy = await self._policies.resolve_model_policy(session, spaces, context)
+        model_name = self._resolve_model_name(request=request, model_policy=model_policy)
+        input_transform = await self._pii.transform_input_if_needed(
+            session=session,
+            context=context,
+            text=request.message,
+            policy_entity=spaces,
+        )
+        user_persisted_transform = await self._pii.transform_persisted_text_if_needed(
+            session=session,
+            context=context,
+            text=request.message,
+            policy_entity=spaces,
+        )
+        log_transform = await self._pii.transform_log_text_if_needed(
+            session=session,
+            context=context,
+            text=request.message,
+            policy_entity=spaces,
+        )
+        logger.log(
+            logging.WARNING if log_transform.had_transformations else logging.INFO,
+            "chat_request_received trace_id=%s tenant_id=%s content=%s",
+            context.trace_id,
+            context.tenant_id,
+            log_transform.transformed_text,
+        )
         llm_result = await self._llm.generate(
             prompt=prompt,
             transformed_user_text=input_transform.transformed_text,
-            model_override=request.model_override,
+            model_override=model_name,
             context=context,
         )
         output_transform = await self._pii.transform_output_if_needed(
             session=session,
             context=context,
             text=llm_result.content,
+            policy_entity=spaces,
+        )
+        assistant_persisted_transform = await self._pii.transform_persisted_text_if_needed(
+            session=session,
+            context=context,
+            text=llm_result.content,
+            policy_entity=spaces,
         )
         persisted = await self._conversations.persist_assistant_message(
             session=session,
             context=context,
             request=request,
             retrieval_result=retrieval_result,
-            final_text=output_transform.transformed_text,
+            persisted_user_text=user_persisted_transform.transformed_text,
+            final_text=assistant_persisted_transform.transformed_text,
             model_used=llm_result.model_used,
             tokens_used=llm_result.tokens_used,
         )
@@ -98,6 +144,7 @@ class ChatService:
         context: RequestContext,
     ) -> AsyncGenerator[ChatStreamEvent, None]:
         try:
+            spaces = await self._load_spaces(session, request.space_ids)
             retrieval_result = await self._retrieval.retrieve(
                 session=session,
                 request=RetrievalRequest(
@@ -114,35 +161,112 @@ class ChatService:
                 request=request,
                 retrieval_result=retrieval_result,
             )
-            input_transform = await self._pii.transform_input_if_needed(session=session, context=context, text=request.message)
-            final_chunks: list[str] = []
+            model_policy = await self._policies.resolve_model_policy(session, spaces, context)
+            model_name = self._resolve_model_name(request=request, model_policy=model_policy)
+            input_transform = await self._pii.transform_input_if_needed(
+                session=session,
+                context=context,
+                text=request.message,
+                policy_entity=spaces,
+            )
+            user_persisted_transform = await self._pii.transform_persisted_text_if_needed(
+                session=session,
+                context=context,
+                text=request.message,
+                policy_entity=spaces,
+            )
+            log_transform = await self._pii.transform_log_text_if_needed(
+                session=session,
+                context=context,
+                text=request.message,
+                policy_entity=spaces,
+            )
+            logger.log(
+                logging.WARNING if log_transform.had_transformations else logging.INFO,
+                "chat_stream_received trace_id=%s tenant_id=%s content=%s",
+                context.trace_id,
+                context.tenant_id,
+                log_transform.transformed_text,
+            )
+            raw_chunks: list[str] = []
+            emitted_chunks: list[str] = []
+            boundary_buffer = ""
 
             async for token in self._llm.stream_generate(
                 prompt=prompt,
                 transformed_user_text=input_transform.transformed_text,
-                model_override=request.model_override,
+                model_override=model_name,
                 context=context,
             ):
-                final_chunks.append(token)
-                yield ChatStreamEventToken(type="token", content=token)
+                raw_chunks.append(token)
+                boundary_buffer += token
+                flushable, boundary_buffer = self._split_boundary_buffer(boundary_buffer)
+                if not flushable:
+                    continue
+                cleaned = await self._pii.transform_output_if_needed(
+                    session=session,
+                    context=context,
+                    text=flushable,
+                    policy_entity=spaces,
+                )
+                emitted_chunks.append(cleaned.transformed_text)
+                yield ChatStreamEventToken(type="token", content=cleaned.transformed_text)
+
+            if boundary_buffer:
+                cleaned_tail = await self._pii.transform_output_if_needed(
+                    session=session,
+                    context=context,
+                    text=boundary_buffer,
+                    policy_entity=spaces,
+                )
+                emitted_chunks.append(cleaned_tail.transformed_text)
+                yield ChatStreamEventToken(type="token", content=cleaned_tail.transformed_text)
 
             for citation in retrieval_result.citations:
                 yield ChatStreamEventCitation(type="citation", citation=citation)
 
-            output_transform = await self._pii.transform_output_if_needed(
+            assistant_persisted_transform = await self._pii.transform_persisted_text_if_needed(
                 session=session,
                 context=context,
-                text="".join(final_chunks).strip(),
+                text="".join(raw_chunks).strip(),
+                policy_entity=spaces,
             )
             persisted = await self._conversations.persist_assistant_message(
                 session=session,
                 context=context,
                 request=request,
                 retrieval_result=retrieval_result,
-                final_text=output_transform.transformed_text,
+                persisted_user_text=user_persisted_transform.transformed_text,
+                final_text=assistant_persisted_transform.transformed_text,
                 model_used=None,
                 tokens_used=None,
             )
             yield ChatStreamEventDone(type="done", message_id=persisted.message_id, trace_id=context.trace_id)
         except Exception as exc:
             yield ChatStreamEventError(type="error", code="chat_stream_failed", message=str(exc))
+
+    async def _load_spaces(self, session: AsyncSession, space_ids: list) -> list[KnowledgeSpace]:
+        spaces = (
+            await session.execute(select(KnowledgeSpace).where(KnowledgeSpace.id.in_(space_ids)))
+        ).scalars().all()
+        by_id = {space.id: space for space in spaces}
+        return [by_id[space_id] for space_id in space_ids if space_id in by_id]
+
+    def _resolve_model_name(self, *, request: ChatRequest, model_policy) -> str:
+        if request.model_override is None:
+            return model_policy.default_model
+
+        allowed_models = set(model_policy.allowed_models) if model_policy.allowed_models else {model_policy.default_model}
+        if request.model_override not in allowed_models:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Model override '{request.model_override}' is not allowed by policy.",
+            )
+        return request.model_override
+
+    def _split_boundary_buffer(self, text: str) -> tuple[str, str]:
+        last_boundary = max(text.rfind("."), text.rfind("!"), text.rfind("?"), text.rfind("\n"))
+        if last_boundary == -1:
+            return "", text
+        split_at = last_boundary + 1
+        return text[:split_at], text[split_at:]

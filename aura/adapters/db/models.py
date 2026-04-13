@@ -137,6 +137,76 @@ class ToneProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class ModelPolicy(Base):
+    __tablename__ = "model_policies"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_model_policies_tenant_name"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    default_model: Mapped[str] = mapped_column(Text, nullable=False)
+    allowed_models: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    max_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("4096"))
+    temperature: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0.2"))
+    context_window_limit: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("128000"))
+    rate_limit_rpm: Mapped[int | None] = mapped_column(Integer)
+    rate_limit_tpd: Mapped[int | None] = mapped_column(Integer)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PiiPolicy(Base):
+    __tablename__ = "pii_policies"
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('off','detect_only','mask_inference_only','mask_persist_and_inference','pseudonymize_rehydratable')",
+            name="ck_pii_policies_mode",
+        ),
+        UniqueConstraint("tenant_id", "name", name="uq_pii_policies_tenant_name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    mode: Mapped[str] = mapped_column(Text, nullable=False)
+    entities_to_detect: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    score_threshold: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0.7"))
+    persist_mapping: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    mapping_ttl_days: Mapped[int | None] = mapped_column(Integer)
+    allow_raw_in_logs: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    allow_raw_in_traces: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SandboxPolicy(Base):
+    __tablename__ = "sandbox_policies"
+    __table_args__ = (
+        CheckConstraint("network_egress IN ('none','allowlist')", name="ck_sandbox_policies_network_egress"),
+        UniqueConstraint("tenant_id", "name", name="uq_sandbox_policies_tenant_name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    network_egress: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'none'"))
+    egress_allowlist: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    max_cpu_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("60"))
+    max_memory_mb: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("512"))
+    max_wall_time_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("120"))
+    writable_paths: Mapped[list[str]] = mapped_column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{\"/workspace\",\"/artifacts\"}'::text[]"),
+    )
+    env_vars_allowed: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class KnowledgeSpace(Base):
     __tablename__ = "knowledge_spaces"
     __table_args__ = (
@@ -159,7 +229,7 @@ class KnowledgeSpace(Base):
     source_access_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'space_acl_only'"))
     embedding_profile_id: Mapped[UUID] = mapped_column(ForeignKey("embedding_profiles.id"), nullable=False)
     retrieval_profile_id: Mapped[UUID] = mapped_column(ForeignKey("retrieval_profiles.id"), nullable=False)
-    pii_policy_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    pii_policy_id: Mapped[UUID | None] = mapped_column(ForeignKey("pii_policies.id"), nullable=True)
     tone_profile_id: Mapped[UUID | None] = mapped_column(ForeignKey("tone_profiles.id"), nullable=True)
     system_instructions: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))

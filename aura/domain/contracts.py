@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
+from enum import Enum
 from typing import Literal
 
 
@@ -66,6 +67,67 @@ class ToneProfile(BaseModel):
     prompt_snippet: str
     language: str | None = None
     formality: Literal["formal", "neutral", "casual"] = "neutral"
+    created_at: datetime
+    updated_at: datetime
+
+
+class ModelPolicy(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    default_model: str
+    allowed_models: list[str]
+    max_tokens: int = 4096
+    temperature: float = 0.2
+    context_window_limit: int = 128_000
+    rate_limit_rpm: int | None = None
+    rate_limit_tpd: int | None = None
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class PiiMode(str, Enum):
+    off = "off"
+    detect_only = "detect_only"
+    mask_inference_only = "mask_inference_only"
+    mask_persist_and_inference = "mask_persist_and_inference"
+    pseudonymize_rehydratable = "pseudonymize_rehydratable"
+
+
+class PiiPolicy(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    mode: PiiMode
+    entities_to_detect: list[str] = Field(default_factory=list)
+    score_threshold: float = 0.7
+    persist_mapping: bool = False
+    mapping_ttl_days: int | None = None
+    allow_raw_in_logs: bool = False
+    allow_raw_in_traces: bool = False
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class NetworkEgressMode(str, Enum):
+    none = "none"
+    allowlist = "allowlist"
+
+
+class SandboxPolicy(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    network_egress: NetworkEgressMode = NetworkEgressMode.none
+    egress_allowlist: list[str] = Field(default_factory=list)
+    max_cpu_seconds: int = 60
+    max_memory_mb: int = 512
+    max_wall_time_s: int = 120
+    writable_paths: list[str] = Field(default_factory=lambda: ["/workspace", "/artifacts"])
+    env_vars_allowed: list[str] = Field(default_factory=list)
+    is_default: bool = False
     created_at: datetime
     updated_at: datetime
 

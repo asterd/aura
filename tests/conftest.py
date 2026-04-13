@@ -62,6 +62,7 @@ TestAsyncSession = async_sessionmaker(test_engine, expire_on_commit=False)
 # ---------------------------------------------------------------------------
 TENANT_A = UUID("aaaaaaaa-0000-0000-0000-000000000001")
 TENANT_B = UUID("bbbbbbbb-0000-0000-0000-000000000002")
+TENANT_WITH_PII_POLICY = TENANT_B
 USER_A_SUB = "okta|user_a"
 USER_B_SUB = "okta|user_b"
 

@@ -24,12 +24,13 @@ class ConversationService:
         context: RequestContext,
         request: ChatRequest,
         retrieval_result: RetrievalResult,
+        persisted_user_text: str,
         final_text: str,
         model_used: str | None = None,
         tokens_used: int | None = None,
     ) -> PersistedAssistantMessage:
         conversation = await self._get_or_create_conversation(session, context, request)
-        await self._persist_user_message_if_needed(session, context, conversation.id, request.message)
+        await self._persist_user_message_if_needed(session, context, conversation.id, persisted_user_text)
 
         assistant_message = Message(
             tenant_id=context.tenant_id,
