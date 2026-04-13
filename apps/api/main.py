@@ -18,6 +18,7 @@ from sqlalchemy import text
 from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context, identity_middleware
 from apps.api.dependencies.db import get_db_session
+from apps.api.routers.spaces import router as spaces_router
 from aura.adapters.db.session import AsyncSessionLocal
 from aura.domain.contracts import RequestContext, UserIdentity
 from aura.domain.models import User
@@ -36,6 +37,7 @@ class MeResponse(BaseModel):
 
 app = FastAPI(title="AURA API")
 app.middleware("http")(identity_middleware)
+app.include_router(spaces_router)
 
 
 async def _check_postgres() -> Literal["ok", "degraded"]:

@@ -44,6 +44,7 @@ packages = [
     "apps",
     "apps.api",
     "apps.api.dependencies",
+    "apps.api.routers",
     "apps.worker",
     "aura",
     "aura.adapters",

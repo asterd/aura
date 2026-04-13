@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
+from typing import Literal
 
 
 class UserIdentity(BaseModel):
@@ -23,3 +24,66 @@ class RequestContext(BaseModel):
     tenant_id: UUID
     identity: UserIdentity
     now_utc: datetime
+
+
+class EmbeddingProfile(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    litellm_model: str
+    dimensions: int
+    chunk_size: int
+    chunk_overlap: int
+    splitter: Literal["sentence", "token", "semantic"]
+    batch_size: int = 64
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class RetrievalProfile(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    top_k: int = 10
+    rerank_top_k: int = 5
+    score_threshold: float = 0.0
+    dense_weight: float = 0.7
+    sparse_weight: float = 0.3
+    reranker: Literal["none", "cross-encoder-local", "litellm-rerank"] = "none"
+    reranker_model: str | None = None
+    query_rewrite_enabled: bool = False
+    query_rewrite_model: str | None = None
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class ToneProfile(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    prompt_snippet: str
+    language: str | None = None
+    formality: Literal["formal", "neutral", "casual"] = "neutral"
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeSpace(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    slug: str
+    space_type: Literal["personal", "team", "enterprise"]
+    visibility: Literal["private", "team", "enterprise"]
+    source_access_mode: Literal["space_acl_only", "source_acl_enforced"]
+    embedding_profile_id: UUID
+    retrieval_profile_id: UUID
+    pii_policy_id: UUID | None = None
+    tone_profile_id: UUID | None = None
+    system_instructions: str | None = None
+    status: Literal["active", "archived"]
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
