@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aura.adapters.db.models import KnowledgeSpace
 from aura.domain.contracts import (
+    AgentRunResult,
     ChatRequest,
     ChatResponse,
     ChatStreamEvent,
@@ -56,7 +57,6 @@ class ChatService:
         request: ChatRequest,
         context: RequestContext,
     ) -> ChatResponse:
-        spaces = await self._load_spaces(session, request.space_ids)
         retrieval_result = await self._retrieval.retrieve(
             session=session,
             request=RetrievalRequest(
@@ -67,6 +67,48 @@ class ChatService:
             ),
             context=context,
         )
+        return await self.respond_with_context(
+            session=session,
+            request=request,
+            retrieval_result=retrieval_result,
+            context=context,
+        )
+
+    async def respond_stream(
+        self,
+        *,
+        session: AsyncSession,
+        request: ChatRequest,
+        context: RequestContext,
+    ) -> AsyncGenerator[ChatStreamEvent, None]:
+        retrieval_result = await self._retrieval.retrieve(
+            session=session,
+            request=RetrievalRequest(
+                query=request.message,
+                space_ids=request.space_ids,
+                conversation_id=request.conversation_id,
+                retrieval_profile_id=request.retrieval_profile_id,
+            ),
+            context=context,
+        )
+        async for event in self.respond_stream_with_context(
+            session=session,
+            request=request,
+            retrieval_result=retrieval_result,
+            context=context,
+        ):
+            yield event
+
+    async def respond_with_context(
+        self,
+        *,
+        session: AsyncSession,
+        request: ChatRequest,
+        retrieval_result,
+        context: RequestContext,
+        agent_runs: list[dict[str, str | AgentRunResult]] | None = None,
+    ) -> ChatResponse:
+        spaces = await self._load_spaces(session, request.space_ids)
         prompt = await self._prompt.build_prompt_stack(
             session=session,
             context=context,
@@ -127,6 +169,7 @@ class ChatService:
             final_text=assistant_persisted_transform.transformed_text,
             model_used=llm_result.model_used,
             tokens_used=llm_result.tokens_used,
+            agent_runs=agent_runs,
         )
         return ChatResponse(
             conversation_id=persisted.conversation_id,
@@ -136,25 +179,17 @@ class ChatService:
             trace_id=context.trace_id,
         )
 
-    async def respond_stream(
+    async def respond_stream_with_context(
         self,
         *,
         session: AsyncSession,
         request: ChatRequest,
+        retrieval_result,
         context: RequestContext,
+        agent_runs: list[dict[str, str | AgentRunResult]] | None = None,
     ) -> AsyncGenerator[ChatStreamEvent, None]:
         try:
             spaces = await self._load_spaces(session, request.space_ids)
-            retrieval_result = await self._retrieval.retrieve(
-                session=session,
-                request=RetrievalRequest(
-                    query=request.message,
-                    space_ids=request.space_ids,
-                    conversation_id=request.conversation_id,
-                    retrieval_profile_id=request.retrieval_profile_id,
-                ),
-                context=context,
-            )
             prompt = await self._prompt.build_prompt_stack(
                 session=session,
                 context=context,
@@ -240,6 +275,7 @@ class ChatService:
                 final_text=assistant_persisted_transform.transformed_text,
                 model_used=None,
                 tokens_used=None,
+                agent_runs=agent_runs,
             )
             yield ChatStreamEventDone(type="done", message_id=persisted.message_id, trace_id=context.trace_id)
         except Exception as exc:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Literal
 from uuid import UUID
+from uuid import uuid4
 
 from pydantic import BaseModel, EmailStr, Field
-from enum import Enum
-from typing import Literal
 
 
 class UserIdentity(BaseModel):
@@ -244,6 +246,7 @@ class ChatRequest(BaseModel):
     retrieval_profile_id: UUID | None = None
     model_override: str | None = None
     stream: bool = False
+    invoked_agents: list["AgentInvocation"] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):
@@ -276,7 +279,110 @@ class ChatStreamEventError(BaseModel):
     message: str
 
 
-ChatStreamEvent = ChatStreamEventToken | ChatStreamEventCitation | ChatStreamEventDone | ChatStreamEventError
+class ChatStreamEventAgentRunning(BaseModel):
+    type: Literal["agent_running"]
+    agent_name: str
+    run_id: UUID
+
+
+class ChatStreamEventAgentDone(BaseModel):
+    type: Literal["agent_done"]
+    agent_name: str
+    run_id: UUID
+    status: Literal["succeeded", "failed"]
+    artifacts: list[str] = Field(default_factory=list)
+
+
+ChatStreamEvent = (
+    ChatStreamEventToken
+    | ChatStreamEventCitation
+    | ChatStreamEventDone
+    | ChatStreamEventError
+    | ChatStreamEventAgentRunning
+    | ChatStreamEventAgentDone
+)
+
+
+class AgentRunRequest(BaseModel):
+    run_id: UUID | None = None
+    agent_name: str
+    agent_version: str | None = None
+    input: dict
+    conversation_id: UUID | None = None
+
+
+class AgentRunResult(BaseModel):
+    run_id: UUID
+    agent_name: str
+    agent_version: str
+    status: Literal["succeeded", "failed"]
+    output_data: dict | None = None
+    output_text: str | None = None
+    trace_id: str
+    artifacts: list[str] = Field(default_factory=list)
+    error_message: str | None = None
+
+
+@dataclass
+class AgentDeps:
+    identity: UserIdentity
+    model_policy: "ModelPolicy"
+    pii_policy: "PiiPolicy | None"
+    allowed_spaces: list[UUID]
+    allowed_tools: list[str]
+    litellm_base_url: str
+    litellm_virtual_key: str
+    knowledge_service: Any
+    artifact_writer: Any
+    resolve_system_prompt: Callable[[str], str]
+
+
+class AgentInvocation(BaseModel):
+    agent_name: str
+    agent_version: str | None = None
+    input_override: dict | None = None
+
+
+class AgentChatInput(BaseModel):
+    user_message: str
+    recent_messages: list[dict] = Field(default_factory=list)
+    space_ids: list[UUID] = Field(default_factory=list)
+
+
+class CronTrigger(BaseModel):
+    type: Literal["cron"] = "cron"
+    cron_expression: str
+    max_runs: int | None = None
+    run_as_service_identity: bool = True
+
+
+class EventTrigger(BaseModel):
+    type: Literal["event"] = "event"
+    event_type: Literal[
+        "document.ingested",
+        "document.updated",
+        "document.deleted",
+        "space.member_added",
+        "space.member_removed",
+        "webhook.inbound",
+    ]
+    space_ids: list[UUID] = Field(default_factory=list)
+    filter_tags: list[str] = Field(default_factory=list)
+    webhook_secret_ref: str | None = None
+
+
+AgentTrigger = CronTrigger | EventTrigger
+
+
+class InternalEvent(BaseModel):
+    event_id: UUID = Field(default_factory=uuid4)
+    tenant_id: UUID
+    event_type: str
+    source_entity_id: UUID | None = None
+    source_space_id: UUID | None = None
+    tags: list[str] = Field(default_factory=list)
+    payload: dict = Field(default_factory=dict)
+    occurred_at: datetime
 
 
 class DetectedEntity(BaseModel):
@@ -311,3 +417,6 @@ class IdentitySyncResult(BaseModel):
     unmapped_users: int
     partial_failures: int
     completed_at: datetime
+
+
+ChatRequest.model_rebuild()

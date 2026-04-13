@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
-from apps.api.dependencies.services import get_chat_service, get_retrieval_service
+from apps.api.dependencies.services import get_agent_chat_service, get_chat_service, get_conversation_service, get_retrieval_service
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.contracts import ChatRequest, ChatResponse, RequestContext, RetrievalRequest, RetrievalResult
+from aura.services.agent_chat_service import AgentChatService
 from aura.services.chat import ChatService
+from aura.services.conversation_service import ConversationService
 from aura.services.retrieval import RetrievalService
 
 
@@ -61,8 +63,18 @@ async def respond(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
     chat_service: ChatService = Depends(get_chat_service),
+    agent_chat_service: AgentChatService = Depends(get_agent_chat_service),
+    conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> ChatResponse:
-    return await chat_service.respond(session=session, request=ChatRequest(**payload.model_dump()), context=context)
+    request = ChatRequest(**payload.model_dump())
+    if request.invoked_agents or "@" in request.message:
+        history = await conversation_service.get_history(
+            session=session,
+            context=context,
+            conversation_id=request.conversation_id,
+        )
+        return await agent_chat_service.respond(session=session, ctx=context, request=request, history=history)
+    return await chat_service.respond(session=session, request=request, context=context)
 
 
 @router.post("/stream")
@@ -70,16 +82,33 @@ async def stream(
     payload: StreamApiRequest,
     context: RequestContext = Depends(get_request_context),
     chat_service: ChatService = Depends(get_chat_service),
+    agent_chat_service: AgentChatService = Depends(get_agent_chat_service),
+    conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> StreamingResponse:
     async def event_source():
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 await set_tenant_rls(session, context.tenant_id)
-                async for event in chat_service.respond_stream(
-                    session=session,
-                    request=ChatRequest(**payload.model_dump()),
-                    context=context,
-                ):
+                request = ChatRequest(**payload.model_dump())
+                if request.invoked_agents or "@" in request.message:
+                    history = await conversation_service.get_history(
+                        session=session,
+                        context=context,
+                        conversation_id=request.conversation_id,
+                    )
+                    event_iter = agent_chat_service.respond_stream(
+                        session=session,
+                        ctx=context,
+                        request=request,
+                        history=history,
+                    )
+                else:
+                    event_iter = chat_service.respond_stream(
+                        session=session,
+                        request=request,
+                        context=context,
+                    )
+                async for event in event_iter:
                     yield f"data: {json.dumps(event.model_dump(mode='json'))}\n\n"
 
     return StreamingResponse(event_source(), media_type="text/event-stream")

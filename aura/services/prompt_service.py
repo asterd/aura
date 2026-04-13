@@ -99,6 +99,10 @@ class PromptService:
             return ""
         return await self.resolve_optional_prompt("agent_prompt")
 
+    async def resolve_agent_prompt(self, *, session: AsyncSession, version, context: RequestContext) -> str:
+        del session, version, context
+        return await self.resolve_optional_prompt("agent_prompt")
+
     async def _resolve_prompt_from_langfuse(self, prompt_id: str) -> str | None:
         headers = {"Authorization": f"Bearer {self._langfuse_secret}"}
         async with httpx.AsyncClient(base_url=self._langfuse_base_url, timeout=5.0) as client:

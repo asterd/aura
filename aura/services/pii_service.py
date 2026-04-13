@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import logging
 import re
 from dataclasses import dataclass
@@ -250,6 +251,9 @@ class PiiService:
 
     def _build_presidio_analyzer(self):
         if AnalyzerEngine is None or Pattern is None or PatternRecognizer is None or RecognizerRegistry is None:
+            return None
+        if importlib.util.find_spec("en_core_web_lg") is None:
+            logger.warning("presidio_spacy_model_missing_falling_back_to_regex")
             return None
 
         try:

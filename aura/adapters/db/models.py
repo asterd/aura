@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Float,
+    Numeric,
     ForeignKey,
     Integer,
     PrimaryKeyConstraint,
@@ -17,6 +18,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -351,4 +353,109 @@ class MessageCitation(Base):
     chunk_id: Mapped[UUID] = mapped_column(nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     snippet: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AgentPackage(Base):
+    __tablename__ = "agent_packages"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_agent_packages_tenant_name"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class AgentVersion(Base):
+    __tablename__ = "agent_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "agent_type IN ('single','orchestrator','triggered','autonomous')",
+            name="ck_agent_versions_agent_type",
+        ),
+        CheckConstraint(
+            "status IN ('draft','validated','published','deprecated')",
+            name="ck_agent_versions_status",
+        ),
+        UniqueConstraint("agent_package_id", "version", name="uq_agent_versions_package_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    agent_package_id: Mapped[UUID] = mapped_column(ForeignKey("agent_packages.id"), nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    version: Mapped[str] = mapped_column(Text, nullable=False)
+    agent_type: Mapped[str] = mapped_column(Text, nullable=False)
+    entrypoint: Mapped[str] = mapped_column(Text, nullable=False)
+    manifest: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    artifact_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    model_policy_id: Mapped[UUID | None] = mapped_column(ForeignKey("model_policies.id"))
+    pii_policy_id: Mapped[UUID | None] = mapped_column(ForeignKey("pii_policies.id"))
+    sandbox_policy_id: Mapped[UUID | None] = mapped_column(ForeignKey("sandbox_policies.id"))
+    max_budget_usd: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    timeout_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("120"))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+    __table_args__ = (CheckConstraint("status IN ('running','succeeded','failed')", name="ck_agent_runs_status"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    agent_version_id: Mapped[UUID] = mapped_column(ForeignKey("agent_versions.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    conversation_id: Mapped[UUID | None] = mapped_column(ForeignKey("conversations.id"))
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    input_ref: Mapped[str | None] = mapped_column(Text)
+    output_data: Mapped[dict | None] = mapped_column(JSONB)
+    output_text: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    trace_id: Mapped[str | None] = mapped_column(Text)
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    artifact_refs: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentTriggerRegistration(Base):
+    __tablename__ = "agent_trigger_registrations"
+    __table_args__ = (
+        CheckConstraint("trigger_type IN ('cron', 'event')", name="ck_agent_trigger_registrations_type"),
+        CheckConstraint(
+            "status IN ('active', 'paused', 'deregistered')",
+            name="ck_agent_trigger_registrations_status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    agent_version_id: Mapped[UUID] = mapped_column(ForeignKey("agent_versions.id"), nullable=False)
+    trigger_type: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_config: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    runs_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MessageAgentRun(Base):
+    __tablename__ = "message_agent_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "invocation_mode IN ('explicit', 'mention', 'auto')",
+            name="ck_message_agent_runs_invocation_mode",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("conversations.id"), nullable=False)
+    message_id: Mapped[UUID] = mapped_column(ForeignKey("messages.id"), nullable=False)
+    agent_run_id: Mapped[UUID] = mapped_column(ForeignKey("agent_runs.id"), nullable=False)
+    agent_name: Mapped[str] = mapped_column(Text, nullable=False)
+    invocation_mode: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

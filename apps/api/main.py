@@ -18,9 +18,12 @@ from sqlalchemy import text
 from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context, identity_middleware
 from apps.api.dependencies.db import get_db_session
+from apps.api.routers.agents import router as agents_router
 from apps.api.routers.chat import router as chat_router
+from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.datasources import router as datasources_router
 from apps.api.routers.spaces import router as spaces_router
+from apps.api.routers.webhooks import router as webhooks_router
 from aura.adapters.db.session import AsyncSessionLocal
 from aura.domain.contracts import RequestContext, UserIdentity
 from aura.domain.models import User
@@ -42,8 +45,11 @@ class MeResponse(BaseModel):
 app = FastAPI(title="AURA API")
 app.middleware("http")(identity_middleware)
 app.include_router(chat_router)
+app.include_router(agents_router)
+app.include_router(conversations_router)
 app.include_router(spaces_router)
 app.include_router(datasources_router)
+app.include_router(webhooks_router)
 
 
 async def _check_postgres() -> Literal["ok", "degraded"]:

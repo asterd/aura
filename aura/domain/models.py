@@ -1,4 +1,8 @@
 from aura.adapters.db.models import (
+    AgentPackage,
+    AgentRun,
+    AgentTriggerRegistration,
+    AgentVersion,
     Base,
     Conversation,
     Datasource,
@@ -8,6 +12,7 @@ from aura.adapters.db.models import (
     Group,
     KnowledgeSpace,
     Message,
+    MessageAgentRun,
     MessageCitation,
     ModelPolicy,
     PiiPolicy,
@@ -22,6 +27,10 @@ from aura.adapters.db.models import (
 
 __all__ = [
     "Base",
+    "AgentPackage",
+    "AgentRun",
+    "AgentTriggerRegistration",
+    "AgentVersion",
     "Conversation",
     "Datasource",
     "Document",
@@ -30,6 +39,7 @@ __all__ = [
     "Group",
     "KnowledgeSpace",
     "Message",
+    "MessageAgentRun",
     "MessageCitation",
     "ModelPolicy",
     "PiiPolicy",
