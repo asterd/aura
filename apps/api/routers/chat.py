@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
+from apps.api.dependencies.services import get_chat_service, get_retrieval_service
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.contracts import ChatRequest, ChatResponse, RequestContext, RetrievalRequest, RetrievalResult
 from aura.services.chat import ChatService
@@ -17,8 +18,6 @@ from aura.services.retrieval import RetrievalService
 
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
-retrieval_service = RetrievalService()
-chat_service = ChatService(retrieval_service=retrieval_service)
 
 
 class RetrieveApiRequest(BaseModel):
@@ -46,6 +45,7 @@ async def retrieve(
     payload: RetrieveApiRequest,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
 ) -> RetrieveApiResponse:
     result = await retrieval_service.retrieve(
         session=session,
@@ -60,6 +60,7 @@ async def respond(
     payload: RespondApiRequest,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
+    chat_service: ChatService = Depends(get_chat_service),
 ) -> ChatResponse:
     return await chat_service.respond(session=session, request=ChatRequest(**payload.model_dump()), context=context)
 
@@ -68,6 +69,7 @@ async def respond(
 async def stream(
     payload: StreamApiRequest,
     context: RequestContext = Depends(get_request_context),
+    chat_service: ChatService = Depends(get_chat_service),
 ) -> StreamingResponse:
     async def event_source():
         async with AsyncSessionLocal() as session:

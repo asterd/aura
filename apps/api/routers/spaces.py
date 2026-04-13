@@ -8,12 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import require_identity
 from apps.api.dependencies.db import get_db_session
+from apps.api.dependencies.services import get_space_service
 from aura.domain.contracts import KnowledgeSpace, UserIdentity
 from aura.services.space_service import AddMemberInput, CreateSpaceInput, SpaceService, UpdateSpaceInput
 
 
 router = APIRouter(prefix="/api/v1/spaces", tags=["spaces"])
-space_service = SpaceService()
 
 
 class CreateSpaceRequest(BaseModel):
@@ -50,6 +50,7 @@ async def create_space(
     payload: CreateSpaceRequest,
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
+    space_service: SpaceService = Depends(get_space_service),
 ) -> KnowledgeSpace:
     return await space_service.create_space(session, identity, CreateSpaceInput(**payload.model_dump()))
 
@@ -58,6 +59,7 @@ async def create_space(
 async def list_spaces(
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
+    space_service: SpaceService = Depends(get_space_service),
 ) -> list[KnowledgeSpace]:
     return await space_service.list_spaces(session, identity)
 
@@ -67,6 +69,7 @@ async def get_space(
     space_id: UUID,
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
+    space_service: SpaceService = Depends(get_space_service),
 ) -> KnowledgeSpace:
     return await space_service.get_space(session, identity, space_id)
 
@@ -77,6 +80,7 @@ async def update_space(
     payload: UpdateSpaceRequest,
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
+    space_service: SpaceService = Depends(get_space_service),
 ) -> KnowledgeSpace:
     return await space_service.update_space(session, identity, space_id, UpdateSpaceInput(**payload.model_dump()))
 
@@ -86,6 +90,7 @@ async def archive_space(
     space_id: UUID,
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
+    space_service: SpaceService = Depends(get_space_service),
 ) -> KnowledgeSpace:
     return await space_service.archive_space(session, identity, space_id)
 
@@ -96,5 +101,6 @@ async def add_member(
     payload: AddMemberRequest,
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
+    space_service: SpaceService = Depends(get_space_service),
 ) -> KnowledgeSpace:
     return await space_service.add_member(session, identity, space_id, AddMemberInput(**payload.model_dump()))

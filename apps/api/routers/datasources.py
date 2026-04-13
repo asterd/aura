@@ -9,12 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
+from apps.api.dependencies.services import get_datasource_service
 from aura.domain.contracts import RequestContext
 from aura.services.datasource_service import DatasourceService
 
 
 router = APIRouter(prefix="/api/v1/datasources", tags=["datasources"])
-datasource_service = DatasourceService()
 
 
 class UploadDatasourceResponse(BaseModel):
@@ -30,6 +30,7 @@ async def upload_datasource(
     file: UploadFile = File(...),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
+    datasource_service: DatasourceService = Depends(get_datasource_service),
 ) -> UploadDatasourceResponse:
     data = await file.read()
     result = await datasource_service.upload(
