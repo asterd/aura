@@ -1,5 +1,8 @@
 from aura.adapters.db.models import (
     Base,
+    Datasource,
+    Document,
+    DocumentVersion,
     EmbeddingProfile,
     Group,
     KnowledgeSpace,
@@ -13,6 +16,9 @@ from aura.adapters.db.models import (
 
 __all__ = [
     "Base",
+    "Datasource",
+    "Document",
+    "DocumentVersion",
     "EmbeddingProfile",
     "Group",
     "KnowledgeSpace",

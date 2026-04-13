@@ -50,7 +50,13 @@ Alembic         1.13.x
 asyncpg         0.29.x
 ARQ             0.25.x
 Qdrant client   1.9.x
-llama-index-core 0.10.x  (NON il meta-package llama-index)
+pydantic        2.12.x
+pydantic-settings 2.12.x
+httpx           0.28.x
+llama-index-core 0.14.x  (NON il meta-package llama-index)
+llama-index-readers-file 0.6.x
+llama-index-embeddings-litellm 0.5.x
+python-multipart 0.0.26+
 pydantic-ai     ~=1.79   (serie 1.x stabile, V1 API commitment)
 LiteLLM Proxy   1.40.x   (≥4 CPU core, ≥8 GB RAM in prod)
 Langfuse SDK    3.x

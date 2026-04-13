@@ -177,3 +177,65 @@ class SpaceMembership(Base):
     space_id: Mapped[UUID] = mapped_column(ForeignKey("knowledge_spaces.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'reader'"))
+
+
+class Datasource(Base):
+    __tablename__ = "datasources"
+    __table_args__ = (
+        CheckConstraint(
+            "last_sync_status IN ('ok','partial','failed','auth_error','stale')",
+            name="ck_datasources_last_sync_status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    space_id: Mapped[UUID] = mapped_column(ForeignKey("knowledge_spaces.id"), nullable=False)
+    connector_type: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    credentials_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    sync_cursor: Mapped[str | None] = mapped_column(Text)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_status: Mapped[str | None] = mapped_column(Text)
+    stale_threshold_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("86400"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Document(Base):
+    __tablename__ = "documents"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('discovered','fetched','parsed','canonicalized','indexed','active','deleted','error')",
+            name="ck_documents_status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    space_id: Mapped[UUID] = mapped_column(ForeignKey("knowledge_spaces.id"), nullable=False)
+    datasource_id: Mapped[UUID | None] = mapped_column(ForeignKey("datasources.id"))
+    external_id: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'discovered'"))
+    current_version_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class DocumentVersion(Base):
+    __tablename__ = "document_versions"
+    __table_args__ = (UniqueConstraint("document_id", "version_hash", name="uq_document_versions_hash"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    version_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    s3_canonical_ref: Mapped[str | None] = mapped_column(Text)
+    s3_original_ref: Mapped[str | None] = mapped_column(Text)
+    chunk_count: Mapped[int | None] = mapped_column(Integer)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

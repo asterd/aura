@@ -95,6 +95,13 @@ class SpaceService:
             raise _forbidden("You are not allowed to access this space.")
         return space
 
+    async def require_membership(self, session: AsyncSession, identity: UserIdentity, space_id: UUID) -> KnowledgeSpace:
+        space = await self._load_space(session, space_id)
+        role = await self._repository.get_membership_role(session, space_id, identity.user_id)
+        if role is None:
+            raise _forbidden("You are not allowed to access this space.")
+        return space
+
     async def update_space(
         self,
         session: AsyncSession,

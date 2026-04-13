@@ -87,3 +87,39 @@ class KnowledgeSpace(BaseModel):
     created_by: UUID
     created_at: datetime
     updated_at: datetime
+
+
+class NormalizedACL(BaseModel):
+    mode: Literal["space_acl_only", "source_acl_enforced"]
+    allow_users: list[str] = Field(default_factory=list)
+    allow_groups: list[UUID] = Field(default_factory=list)
+    deny_users: list[str] = Field(default_factory=list)
+    deny_groups: list[UUID] = Field(default_factory=list)
+    inherited: bool = True
+
+
+class DocumentMetadata(BaseModel):
+    title: str
+    source_path: str
+    source_url: str | None = None
+    content_type: str
+    language: str | None = None
+    classification: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    modified_at: datetime | None = None
+
+
+class LoadedDocument(BaseModel):
+    external_id: str
+    metadata: DocumentMetadata
+    raw_text: str | None = None
+    raw_bytes_ref: str | None = None
+    acl: NormalizedACL | None = None
+    is_deleted: bool = False
+
+
+class JobPayload(BaseModel):
+    tenant_id: UUID
+    job_key: str
+    requested_by_user_id: UUID | None = None
+    trace_id: str | None = None

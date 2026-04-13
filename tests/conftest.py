@@ -9,13 +9,21 @@ from uuid import UUID, uuid4
 import jwt
 import pytest
 import pytest_asyncio
+from alembic import command
+from alembic.config import Config
+from arq import create_pool
+from arq.connections import RedisSettings
+from arq.jobs import Job
+from boto3 import client as boto3_client
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import ASGITransport, AsyncClient
+from qdrant_client import QdrantClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from apps.api.config import settings
 from aura.adapters.db.session import set_tenant_rls
-from aura.domain.models import Base, User
+from aura.domain.models import User
 from aura.services.identity import JwksCache
 
 # ---------------------------------------------------------------------------
@@ -165,6 +173,15 @@ async def patch_jwks_cache():
     identity_module.settings = original_settings
 
 
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def apply_migrations():
+    def _upgrade() -> None:
+        config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+        command.upgrade(config, "head")
+
+    await asyncio.to_thread(_upgrade)
+
+
 @pytest_asyncio.fixture(scope="session")
 async def setup_tenants():
     """Ensure TENANT_A and TENANT_B rows exist in the tenants table (owner role)."""
@@ -180,6 +197,45 @@ async def setup_tenants():
                 {"id": tid, "slug": str(tid), "name": str(tid), "okta_org_id": str(tid)},
             )
     await owner_engine.dispose()
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def ensure_test_services():
+    def _ensure_bucket() -> None:
+        s3 = boto3_client(
+            "s3",
+            endpoint_url=str(settings.s3_endpoint_url),
+            aws_access_key_id=settings.s3_access_key_id,
+            aws_secret_access_key=settings.s3_secret_access_key.get_secret_value(),
+            region_name=settings.s3_region,
+            use_ssl=settings.s3_secure,
+        )
+        buckets = {bucket["Name"] for bucket in s3.list_buckets().get("Buckets", [])}
+        if settings.s3_bucket_name not in buckets:
+            s3.create_bucket(Bucket=settings.s3_bucket_name)
+
+    def _ensure_qdrant() -> None:
+        QdrantClient(url=str(settings.qdrant_url)).get_collections()
+
+    await asyncio.to_thread(_ensure_bucket)
+    await asyncio.to_thread(_ensure_qdrant)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean_external_state():
+    redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    await redis.flushdb()
+
+    def _clear_qdrant() -> None:
+        client = QdrantClient(url=str(settings.qdrant_url))
+        collections = {collection.name for collection in client.get_collections().collections}
+        if "aura_chunks" in collections:
+            client.delete_collection("aura_chunks")
+
+    await asyncio.to_thread(_clear_qdrant)
+    yield
+    await redis.flushdb()
+    await redis.aclose()
 
 
 @pytest_asyncio.fixture()
@@ -215,3 +271,22 @@ async def insert_test_user(*, tenant_id: UUID, okta_sub: str | None = None) -> U
         )
     await owner_engine.dispose()
     return User(id=user_id, tenant_id=tenant_id, okta_sub=sub, email=f"{sub}@example.com", roles=[], synced_at=now, created_at=now, updated_at=now)
+
+
+async def wait_for_job(job_id: UUID, timeout: float = 30.0) -> None:
+    redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    try:
+        job = Job(str(job_id), redis)
+        job_info = await job.info()
+        if job_info is None:
+            raise AssertionError(f"Job {job_id} not found in Redis.")
+
+        if job_info.function == "ingest_document_job":
+            from apps.worker.jobs.ingestion import ingest_document_job
+
+            await ingest_document_job({"job_try": job_info.job_try}, *job_info.args)
+            return
+
+        raise AssertionError(f"Unsupported test job function: {job_info.function}")
+    finally:
+        await redis.aclose()
