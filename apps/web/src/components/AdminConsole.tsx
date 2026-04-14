@@ -19,6 +19,9 @@ import {
   updateCurrentTenantAuth,
   updateLocalUser,
   getRuntimeKeyState,
+  getApiKeys,
+  createApiKey,
+  revokeApiKey,
 } from "@/lib/api";
 import type {
   CostBudget,
@@ -30,7 +33,10 @@ import type {
   TenantCredential,
   TenantModelConfig,
   UsageAggregate,
+  ApiKeyInfo,
+  ApiKeyCreated,
 } from "@/lib/types";
+import { AgentAdminPanel } from "./AgentAdminPanel";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -174,6 +180,15 @@ export function AdminConsole() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // API Keys state
+  const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([]);
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyScopes, setNewKeyScopes] = useState("");
+  const [newKeyExpires, setNewKeyExpires] = useState("");
+  const [createdKey, setCreatedKey] = useState<ApiKeyCreated | null>(null);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+
   const [tenantForm, setTenantForm] = useState({
     bootstrapToken: "",
     slug: "",
@@ -296,7 +311,56 @@ export function AdminConsole() {
 
   useEffect(() => {
     void loadAll();
+    void loadApiKeys();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll]);
+
+  async function loadApiKeys() {
+    setApiKeysLoading(true);
+    try {
+      const keys = await getApiKeys();
+      setApiKeys(keys);
+    } catch {
+      // silent
+    } finally {
+      setApiKeysLoading(false);
+    }
+  }
+
+  async function handleCreateApiKey() {
+    if (!newKeyName.trim()) {
+      setApiKeyError("Name is required.");
+      return;
+    }
+    setApiKeyError(null);
+    try {
+      const scopes = newKeyScopes
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const result = await createApiKey({
+        name: newKeyName.trim(),
+        scopes,
+        expires_at: newKeyExpires || null,
+      });
+      setCreatedKey(result);
+      setNewKeyName("");
+      setNewKeyScopes("");
+      setNewKeyExpires("");
+      setApiKeys((prev) => [result, ...prev]);
+    } catch (e) {
+      setApiKeyError(e instanceof Error ? e.message : "Failed to create key");
+    }
+  }
+
+  async function handleRevokeApiKey(keyId: string) {
+    try {
+      await revokeApiKey(keyId);
+      setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Revoke failed");
+    }
+  }
 
   async function refreshUsage() {
     try {
@@ -1154,6 +1218,121 @@ export function AdminConsole() {
                 budget.action_on_hard_limit,
               ])}
             />
+          </SectionCard>
+
+          <SectionCard title="Agent Registry" description="Upload ZIP artifacts with manifest YAML and publish agent versions.">
+            <AgentAdminPanel />
+          </SectionCard>
+
+          <SectionCard title="API Keys" description="Create static API keys for M2M authentication. Keys are shown once — store them securely.">
+            <div className="space-y-4">
+              {/* Create new key */}
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: "var(--muted-foreground)" }}>Name</label>
+                  <TextInput
+                    placeholder="ci-pipeline"
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: "var(--muted-foreground)" }}>Scopes (comma-separated)</label>
+                  <TextInput
+                    placeholder="chat,retrieve"
+                    value={newKeyScopes}
+                    onChange={(e) => setNewKeyScopes(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: "var(--muted-foreground)" }}>Expires at (optional)</label>
+                  <TextInput
+                    type="datetime-local"
+                    value={newKeyExpires}
+                    onChange={(e) => setNewKeyExpires(e.target.value)}
+                  />
+                </div>
+              </div>
+              {apiKeyError && (
+                <p className="text-sm" style={{ color: "#ef4444" }}>{apiKeyError}</p>
+              )}
+              <ActionButton onClick={() => void handleCreateApiKey()}>Create API Key</ActionButton>
+
+              {/* Show raw key once */}
+              {createdKey && (
+                <div
+                  className="rounded-xl px-4 py-3 text-sm space-y-1"
+                  style={{ backgroundColor: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.3)" }}
+                >
+                  <p className="font-semibold" style={{ color: "#16a34a" }}>Key created — copy it now, it won&apos;t be shown again.</p>
+                  <code
+                    className="block break-all rounded px-2 py-1 text-xs font-mono"
+                    style={{ backgroundColor: "var(--surface-raised)", color: "var(--foreground)" }}
+                  >
+                    {createdKey.raw_key}
+                  </code>
+                  <button
+                    onClick={() => void navigator.clipboard.writeText(createdKey.raw_key)}
+                    className="text-xs underline"
+                    style={{ color: "var(--accent)" }}
+                  >
+                    Copy to clipboard
+                  </button>
+                  <button
+                    onClick={() => setCreatedKey(null)}
+                    className="ml-4 text-xs underline"
+                    style={{ color: "var(--muted-foreground)" }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Keys list */}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium" style={{ color: "var(--foreground)" }}>Active Keys</p>
+                <button
+                  onClick={() => void loadApiKeys()}
+                  className="text-xs px-3 py-1.5 rounded-lg"
+                  style={{ backgroundColor: "var(--surface-raised)", color: "var(--muted-foreground)", border: "1px solid var(--border)" }}
+                >
+                  {apiKeysLoading ? "Loading…" : "Refresh"}
+                </button>
+              </div>
+              {apiKeys.length === 0 && !apiKeysLoading && (
+                <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>No active API keys.</p>
+              )}
+              <div className="space-y-2">
+                {apiKeys.map((key) => (
+                  <div
+                    key={key.id}
+                    className="flex items-center gap-3 rounded-xl px-4 py-3"
+                    style={{ backgroundColor: "var(--surface-raised)", border: "1px solid var(--border)" }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium" style={{ color: "var(--foreground)" }}>{key.name}</span>
+                        <code className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: "var(--surface)", color: "var(--muted-foreground)" }}>
+                          {key.prefix}…
+                        </code>
+                      </div>
+                      <div className="text-xs mt-0.5 space-x-2" style={{ color: "var(--muted-foreground)" }}>
+                        {key.scopes.length > 0 && <span>scopes: {key.scopes.join(", ")}</span>}
+                        {key.last_used_at && <span>last used: {new Date(key.last_used_at).toLocaleDateString()}</span>}
+                        {key.expires_at && <span>expires: {new Date(key.expires_at).toLocaleDateString()}</span>}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => void handleRevokeApiKey(key.id)}
+                      className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium"
+                      style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </SectionCard>
 
           <SectionCard title="Usage" description="Observed usage aggregates persisted by AURA cost accounting.">

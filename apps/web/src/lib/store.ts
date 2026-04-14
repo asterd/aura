@@ -50,6 +50,13 @@ interface AuraStore {
   setAvailableAgents: (agents: AgentSummary[]) => void;
   setActiveSpaceIds: (threadId: string, ids: string[]) => void;
   setActiveAgentIds: (threadId: string, ids: string[]) => void;
+
+  // Model selection
+  selectedModel: string | null;
+  availableModels: string[];
+  defaultModel: string;
+  setSelectedModel: (model: string | null) => void;
+  setAvailableModels: (models: string[], defaultModel: string) => void;
 }
 
 export const useAuraStore = create<AuraStore>()((set, get) => ({
@@ -304,4 +311,10 @@ export const useAuraStore = create<AuraStore>()((set, get) => ({
     set((s) => ({
       activeAgentIds: { ...s.activeAgentIds, [threadId]: ids },
     })),
+
+  selectedModel: null,
+  availableModels: [],
+  defaultModel: "",
+  setSelectedModel: (model) => set({ selectedModel: model }),
+  setAvailableModels: (models, defaultModel) => set({ availableModels: models, defaultModel }),
 }));

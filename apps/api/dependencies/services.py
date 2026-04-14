@@ -8,6 +8,7 @@ from aura.services.agent_chat_service import AgentChatService
 from aura.services.agent_service import AgentService
 from aura.services.chat import ChatService
 from aura.services.conversation_service import ConversationService
+from aura.services.policy_service import PolicyService
 from aura.services.cost_management_service import CostManagementService
 from aura.services.datasource_service import DatasourceService
 from aura.services.event_dispatcher_service import EventDispatcherService
@@ -24,6 +25,10 @@ from aura.services.trigger_scheduler_service import TriggerSchedulerService
 
 def get_retrieval_service() -> RetrievalService:
     return RetrievalService()
+
+
+def get_policy_service() -> PolicyService:
+    return PolicyService()
 
 
 def get_space_service() -> SpaceService:

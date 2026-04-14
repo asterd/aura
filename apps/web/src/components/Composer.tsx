@@ -10,9 +10,10 @@ import {
   type ChangeEvent,
 } from "react";
 import { useAuraStore } from "@/lib/store";
-import { streamChat, uploadFile } from "@/lib/api";
+import { streamChat, uploadFile, getAvailableModels } from "@/lib/api";
 import type { AgentSummary, Space, Message, ChatStreamEvent } from "@/lib/types";
 import { SpaceSelector } from "./SpaceSelector";
+import { ModelSelector } from "./ModelSelector";
 
 const MAX_CHARS = 32_000;
 
@@ -83,7 +84,22 @@ export function Composer({ threadId, onNewThread }: Props) {
     setActiveThread,
     setActiveSpaceIds,
     setActiveAgentIds,
+    selectedModel,
+    availableModels,
+    defaultModel,
+    setSelectedModel,
+    setAvailableModels,
   } = useAuraStore();
+
+  // Load available models on mount
+  useEffect(() => {
+    getAvailableModels()
+      .then(({ allowed_models, default_model }) => {
+        setAvailableModels(allowed_models, default_model);
+      })
+      .catch(() => {/* silent fail — model selector hidden */});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fallbackSpaceIds = availableSpaces.slice(0, 1).map((s) => s.space_id);
   const currentSpaceIds = threadId
@@ -297,6 +313,7 @@ export function Composer({ threadId, onNewThread }: Props) {
         message: trimmed,
         space_ids: currentSpaceIds,
         active_agent_ids: currentAgentIds.length ? currentAgentIds : undefined,
+        model_override: selectedModel ?? undefined,
         stream: true,
       },
       (event: ChatStreamEvent) => {
@@ -481,6 +498,13 @@ export function Composer({ threadId, onNewThread }: Props) {
               setDraftSpaceIds(ids);
             }
           }}
+          disabled={isStreaming}
+        />
+        <ModelSelector
+          models={availableModels}
+          selected={selectedModel}
+          defaultModel={defaultModel}
+          onChange={setSelectedModel}
           disabled={isStreaming}
         />
         {currentAgentIds.length > 0 && (

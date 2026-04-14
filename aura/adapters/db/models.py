@@ -640,3 +640,19 @@ class MessageAgentRun(Base):
     agent_name: Mapped[str] = mapped_column(Text, nullable=False)
     invocation_mode: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    key_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    prefix: Mapped[str] = mapped_column(Text, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

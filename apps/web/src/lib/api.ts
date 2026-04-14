@@ -14,6 +14,10 @@ import type {
   TenantAdminInfo,
   LocalAdminUser,
   RuntimeKeyState,
+  AgentVersion,
+  AvailableModels,
+  ApiKeyInfo,
+  ApiKeyCreated,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -289,6 +293,81 @@ export function uploadFile(
 // ─── Artifact signed URL ───────────────────────────────────────────────────
 export async function getArtifactSignedUrl(artifactId: string): Promise<{ url: string }> {
   return apiFetch<{ url: string }>(`/artifacts/signed-url?ref=${encodeURIComponent(artifactId)}`);
+}
+
+// ─── Admin Agents ──────────────────────────────────────────────────────────
+export async function getAdminAgents(): Promise<AgentVersion[]> {
+  return apiFetch<AgentVersion[]>("/admin/agents");
+}
+
+export async function publishAgent(agentVersionId: string): Promise<AgentVersion> {
+  return apiFetch<AgentVersion>(`/admin/agents/${agentVersionId}/publish`, {
+    method: "POST",
+  });
+}
+
+export function uploadAgent(
+  manifestYaml: string,
+  zipFile: File,
+  onProgress?: (p: { loaded: number; total: number }) => void
+): Promise<AgentVersion> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("manifest", manifestYaml);
+    formData.append("artifact", zipFile);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/v1/admin/agents/upload`);
+    xhr.withCredentials = true;
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress({ loaded: e.loaded, total: e.total });
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText) as AgentVersion);
+      } else {
+        reject(new Error(`Upload failed: ${xhr.status} — ${xhr.responseText}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during agent upload"));
+    xhr.send(formData);
+  });
+}
+
+// ─── Chat models ───────────────────────────────────────────────────────────
+export async function getAvailableModels(): Promise<AvailableModels> {
+  return apiFetch<AvailableModels>("/chat/models");
+}
+
+// ─── API Keys ──────────────────────────────────────────────────────────────
+export async function getApiKeys(): Promise<ApiKeyInfo[]> {
+  return apiFetch<ApiKeyInfo[]>("/admin/api-keys");
+}
+
+export async function createApiKey(payload: {
+  name: string;
+  scopes: string[];
+  expires_at: string | null;
+}): Promise<ApiKeyCreated> {
+  return apiFetch<ApiKeyCreated>("/admin/api-keys", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function revokeApiKey(keyId: string): Promise<void> {
+  const res = await fetch(`/api/v1/admin/api-keys/${keyId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok && res.status !== 204) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text}`);
+  }
 }
 
 // ─── SSE stream chat ───────────────────────────────────────────────────────

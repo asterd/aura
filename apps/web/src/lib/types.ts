@@ -182,5 +182,36 @@ export interface ChatRequest {
   message: string;
   space_ids: string[];
   active_agent_ids?: string[];
+  model_override?: string;
   stream: true;
+}
+
+export interface AgentVersion {
+  id: string;
+  name: string;
+  version: string;
+  status: "draft" | "published" | "archived";
+  agent_type: string;
+  entrypoint: string;
+}
+
+export interface AgentUploadResult extends AgentVersion {}
+
+export interface AvailableModels {
+  default_model: string;
+  allowed_models: string[];
+}
+
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  expires_at: string | null;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export interface ApiKeyCreated extends ApiKeyInfo {
+  raw_key: string;
 }

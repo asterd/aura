@@ -10,16 +10,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
-from apps.api.dependencies.services import get_agent_chat_service, get_chat_service, get_conversation_service, get_retrieval_service
+from apps.api.dependencies.services import get_agent_chat_service, get_chat_service, get_conversation_service, get_retrieval_service, get_policy_service
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.contracts import ChatRequest, ChatResponse, RequestContext, RetrievalRequest, RetrievalResult
 from aura.services.agent_chat_service import AgentChatService
 from aura.services.chat import ChatService
 from aura.services.conversation_service import ConversationService
+from aura.services.policy_service import PolicyService
 from aura.services.retrieval import RetrievalService
 
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+
+
+class AvailableModelsResponse(BaseModel):
+    default_model: str
+    allowed_models: list[str]
+
+
+@router.get("/models", response_model=AvailableModelsResponse)
+async def get_available_models(
+    context: RequestContext = Depends(get_request_context),
+    session: AsyncSession = Depends(get_db_session),
+    policy_service: PolicyService = Depends(get_policy_service),
+) -> AvailableModelsResponse:
+    """Restituisce i modelli disponibili per l'utente corrente secondo la ModelPolicy attiva."""
+    policy = await policy_service.resolve_model_policy(session=session, entity=None, context=context)
+    return AvailableModelsResponse(
+        default_model=policy.default_model,
+        allowed_models=policy.allowed_models,
+    )
 
 
 def _should_invoke_agent_flow(request: ChatRequest) -> bool:

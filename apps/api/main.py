@@ -20,6 +20,7 @@ from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context, identity_middleware
 from apps.api.dependencies.db import get_db_session
 from apps.api.routers.agents import router as agents_router
+from apps.api.routers.api_keys import router as api_keys_router
 from apps.api.routers.auth import router as auth_router
 from apps.api.routers.artifacts import router as artifacts_router
 from apps.api.routers.chat import router as chat_router
@@ -64,6 +65,7 @@ app.middleware("http")(identity_middleware)
 app.include_router(chat_router)
 app.include_router(auth_router)
 app.include_router(agents_router)
+app.include_router(api_keys_router)
 app.include_router(artifacts_router)
 app.include_router(conversations_router)
 app.include_router(spaces_router)
