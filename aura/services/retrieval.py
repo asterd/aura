@@ -5,6 +5,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+import time
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -19,6 +20,7 @@ from aura.adapters.embeddings.litellm import LiteLLMEmbeddingClient
 from aura.adapters.qdrant.filter_builder import build_retrieval_filter
 from aura.domain.contracts import Citation, KnowledgeSpace, RequestContext, RetrievalRequest, RetrievalResult
 from aura.services.space_service import SpaceService
+from aura.utils.observability import record_retrieval_latency
 
 
 @dataclass(slots=True)
@@ -59,14 +61,28 @@ class RetrievalService:
         )
         query_text = request.query
         embedding_profile = await self._resolve_embedding_profile(session, authorized_spaces[0].embedding_profile_id)
-        candidates = await self._hybrid_search(
-            query=query_text,
-            embedding_profile=embedding_profile,
-            retrieval_profile=retrieval_profile,
-            filter_obj=filter_obj,
-        )
+        started = time.perf_counter()
+        try:
+            candidates = await self._hybrid_search(
+                query=query_text,
+                embedding_profile=embedding_profile,
+                retrieval_profile=retrieval_profile,
+                filter_obj=filter_obj,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Retrieval backend unavailable.",
+            ) from exc
         reranked = self._rerank_candidates(query_text, candidates, retrieval_profile.reranker)
         selected = [candidate for candidate in reranked if candidate.score >= retrieval_profile.score_threshold][: retrieval_profile.rerank_top_k]
+        record_retrieval_latency(
+            space_id=str(authorized_spaces[0].id),
+            reranker=retrieval_profile.reranker,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+        )
         context_blocks = [str(candidate.payload.get("chunk_text") or candidate.payload.get("title") or "") for candidate in selected]
         citations = [self._normalize_citation(index, candidate) for index, candidate in enumerate(selected, start=1)]
         return RetrievalResult(

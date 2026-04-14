@@ -9,6 +9,7 @@ from starlette.responses import Response
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.contracts import RequestContext, UserIdentity
 from aura.services.identity import build_request_context, validate_jwt
+from aura.utils.observability import set_current_trace_id
 
 
 def _extract_bearer_token(request: Request) -> str | None:
@@ -48,6 +49,7 @@ async def identity_middleware(request: Request, call_next) -> Response:
             request.state.tenant_id = context.tenant_id
             request.state.request_id = context.request_id
             request.state.trace_id = context.trace_id
+            set_current_trace_id(context.trace_id)
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     return await call_next(request)

@@ -138,7 +138,10 @@ class ConnectorSyncService:
                     datasource.last_sync_status = "ok"
                     datasource.updated_at = now
             await session.commit()
-        set_gauge_value("aura.datasource.stale_count", stale_count)
+        if target_tenant_id is not None:
+            set_gauge_value("aura.datasource.stale_count", stale_count, {"tenant_id": str(target_tenant_id)})
+        else:
+            set_gauge_value("aura.datasource.stale_count", stale_count)
         return stale_count
 
     async def _upsert_loaded_document(

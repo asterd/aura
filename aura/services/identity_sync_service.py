@@ -146,7 +146,7 @@ class IdentitySyncService:
 
             await session.commit()
 
-        set_gauge_value("aura.identity.sync_freshness_s", 0.0)
+        set_gauge_value("aura.identity.sync_freshness_s", 0.0, {"tenant_id": str(tenant_id)})
         return IdentitySyncResult(
             tenant_id=tenant_id,
             users_seen=len(snapshot.users),

@@ -25,6 +25,7 @@ from apps.api.config import settings
 from aura.adapters.db.session import set_tenant_rls
 from aura.domain.models import Group, User
 from aura.services.identity import JwksCache
+from aura.utils.observability import clear_trace_events
 
 # ---------------------------------------------------------------------------
 # Test database — uses a separate DB or the same with clean-up.
@@ -224,6 +225,7 @@ async def ensure_test_services():
 
 @pytest_asyncio.fixture(autouse=True)
 async def clean_external_state():
+    clear_trace_events()
     redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     await redis.flushdb()
 

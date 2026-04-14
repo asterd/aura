@@ -22,7 +22,7 @@ from aura.domain.contracts import (
     RetrievalRequest,
 )
 from aura.services.conversation_service import ConversationService
-from aura.services.llm_service import LlmService
+from aura.services.llm_service import LlmService, LiteLLMUnavailableError
 from aura.services.pii_service import PiiService
 from aura.services.policy_service import PolicyService
 from aura.services.prompt_service import PromptService
@@ -142,12 +142,18 @@ class ChatService:
             context.tenant_id,
             log_transform.transformed_text,
         )
-        llm_result = await self._llm.generate(
-            prompt=prompt,
-            transformed_user_text=input_transform.transformed_text,
-            model_override=model_name,
-            context=context,
-        )
+        try:
+            llm_result = await self._llm.generate(
+                prompt=prompt,
+                transformed_user_text=input_transform.transformed_text,
+                model_override=model_name,
+                context=context,
+            )
+        except LiteLLMUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="LiteLLM unavailable.",
+            ) from exc
         output_transform = await self._pii.transform_output_if_needed(
             session=session,
             context=context,
@@ -227,25 +233,31 @@ class ChatService:
             emitted_chunks: list[str] = []
             boundary_buffer = ""
 
-            async for token in self._llm.stream_generate(
-                prompt=prompt,
-                transformed_user_text=input_transform.transformed_text,
-                model_override=model_name,
-                context=context,
-            ):
-                raw_chunks.append(token)
-                boundary_buffer += token
-                flushable, boundary_buffer = self._split_boundary_buffer(boundary_buffer)
-                if not flushable:
-                    continue
-                cleaned = await self._pii.transform_output_if_needed(
-                    session=session,
+            try:
+                async for token in self._llm.stream_generate(
+                    prompt=prompt,
+                    transformed_user_text=input_transform.transformed_text,
+                    model_override=model_name,
                     context=context,
-                    text=flushable,
-                    policy_entity=spaces,
-                )
-                emitted_chunks.append(cleaned.transformed_text)
-                yield ChatStreamEventToken(type="token", content=cleaned.transformed_text)
+                ):
+                    raw_chunks.append(token)
+                    boundary_buffer += token
+                    flushable, boundary_buffer = self._split_boundary_buffer(boundary_buffer)
+                    if not flushable:
+                        continue
+                    cleaned = await self._pii.transform_output_if_needed(
+                        session=session,
+                        context=context,
+                        text=flushable,
+                        policy_entity=spaces,
+                    )
+                    emitted_chunks.append(cleaned.transformed_text)
+                    yield ChatStreamEventToken(type="token", content=cleaned.transformed_text)
+            except LiteLLMUnavailableError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="LiteLLM unavailable.",
+                ) from exc
 
             if boundary_buffer:
                 cleaned_tail = await self._pii.transform_output_if_needed(

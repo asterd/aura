@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import time
 
 import httpx
 
 from apps.api.config import settings
 from aura.domain.contracts import RequestContext
+from aura.utils.observability import record_litellm_call_latency, record_litellm_tokens_used
 
 
 @dataclass(slots=True)
@@ -14,6 +16,10 @@ class LlmResult:
     content: str
     model_used: str
     tokens_used: int
+
+
+class LiteLLMUnavailableError(RuntimeError):
+    pass
 
 
 class LlmService:
@@ -32,23 +38,34 @@ class LlmService:
     ) -> LlmResult:
         messages = self._materialize_messages(prompt, transformed_user_text)
         model = model_override or self._default_model
+        record_litellm_tokens_used(
+            model=model,
+            tenant_id=str(context.tenant_id),
+            direction="input",
+            tokens=self.estimate_input_tokens(messages),
+        )
         try:
+            started = time.perf_counter()
             payload = await self._chat_completion(messages=messages, model=model, stream=False)
             choice = payload["choices"][0]["message"]["content"]
             content = choice.strip() if isinstance(choice, str) else ""
             usage = payload.get("usage") or {}
-            return LlmResult(
+            result = LlmResult(
                 content=content or "Non ho trovato contenuto sufficiente per rispondere.",
                 model_used=str(payload.get("model") or model),
                 tokens_used=int(usage.get("total_tokens") or max(1, len((content or "").split()))),
             )
-        except Exception:
-            content = transformed_user_text.strip() or "Non ho trovato contenuto sufficiente per rispondere."
-            return LlmResult(
-                content=content,
-                model_used=f"{model}:fallback",
-                tokens_used=max(1, len(content.split())),
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            record_litellm_call_latency(model=result.model_used, tenant_id=str(context.tenant_id), latency_ms=latency_ms)
+            record_litellm_tokens_used(
+                model=result.model_used,
+                tenant_id=str(context.tenant_id),
+                direction="output",
+                tokens=result.tokens_used,
             )
+            return result
+        except Exception as exc:
+            raise LiteLLMUnavailableError(model) from exc
 
     async def stream_generate(
         self,
@@ -60,7 +77,15 @@ class LlmService:
     ):
         messages = self._materialize_messages(prompt, transformed_user_text)
         model = model_override or self._default_model
+        record_litellm_tokens_used(
+            model=model,
+            tenant_id=str(context.tenant_id),
+            direction="input",
+            tokens=self.estimate_input_tokens(messages),
+        )
         try:
+            started = time.perf_counter()
+            total_tokens = 0
             async with httpx.AsyncClient(base_url=self._base_url, timeout=30.0) as client:
                 async with client.stream(
                     "POST",
@@ -78,17 +103,19 @@ class LlmService:
                         payload = json.loads(data)
                         delta = payload["choices"][0]["delta"].get("content")
                         if isinstance(delta, str) and delta:
+                            total_tokens += max(1, len(delta.split()))
                             yield delta
+            record_litellm_call_latency(model=model, tenant_id=str(context.tenant_id), latency_ms=(time.perf_counter() - started) * 1000.0)
+            if total_tokens:
+                record_litellm_tokens_used(
+                    model=model,
+                    tenant_id=str(context.tenant_id),
+                    direction="output",
+                    tokens=total_tokens,
+                )
             return
-        except Exception:
-            result = await self.generate(
-                prompt=prompt,
-                transformed_user_text=transformed_user_text,
-                model_override=model_override,
-                context=context,
-            )
-            for token in result.content.split():
-                yield f"{token} "
+        except Exception as exc:
+            raise LiteLLMUnavailableError(model) from exc
 
     async def _chat_completion(self, *, messages: list[dict[str, str]], model: str, stream: bool) -> dict:
         async with httpx.AsyncClient(base_url=self._base_url, timeout=30.0) as client:
@@ -109,3 +136,6 @@ class LlmService:
         else:
             messages.append({"role": "user", "content": transformed_user_text})
         return messages
+
+    def estimate_input_tokens(self, messages: list[dict[str, str]]) -> int:
+        return max(1, sum(len(str(message.get("content") or "").split()) for message in messages))

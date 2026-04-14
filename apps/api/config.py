@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     okta_audience: str = Field(default="api://default", alias="OKTA_AUDIENCE")
     langfuse_base_url: AnyHttpUrl = Field(alias="LANGFUSE_BASE_URL")
     langfuse_secret_key: SecretStr = Field(alias="LANGFUSE_SECRET_KEY")
+    langfuse_public_key: str | None = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
+    otlp_endpoint: str | None = Field(default=None, alias="OTLP_ENDPOINT")
     sandbox_provider: str = Field(default="docker", alias="SANDBOX_PROVIDER")
     sandbox_docker_binary: str = Field(default="docker", alias="SANDBOX_DOCKER_BINARY")
     sandbox_default_python_image: str = Field(default="python:3.12-slim", alias="SANDBOX_DEFAULT_PYTHON_IMAGE")

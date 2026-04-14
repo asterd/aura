@@ -4,13 +4,13 @@ import logging
 from pathlib import Path
 from uuid import UUID
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.config import settings
+from aura.adapters.langfuse.client import LangfuseClient, LangfuseUnavailableError
 from aura.adapters.db.models import KnowledgeSpace, ToneProfile
 from aura.domain.contracts import ChatRequest, RequestContext, RetrievalResult
+from aura.utils.observability import get_current_trace_id
 
 
 class PromptNotResolvableError(RuntimeError):
@@ -21,23 +21,22 @@ logger = logging.getLogger(__name__)
 
 
 class PromptService:
-    def __init__(self) -> None:
+    def __init__(self, *, langfuse_client: LangfuseClient | None = None) -> None:
         self._fallback_dir = Path(__file__).resolve().parents[2] / "registries" / "prompts" / "defaults"
-        self._langfuse_base_url = str(settings.langfuse_base_url).rstrip("/")
-        self._langfuse_secret = settings.langfuse_secret_key.get_secret_value()
+        self._langfuse = langfuse_client or LangfuseClient()
 
     async def resolve_prompt(self, prompt_id: str) -> str:
         try:
-            prompt = await self._resolve_prompt_from_langfuse(prompt_id)
-        except Exception:
-            prompt = None
-        if prompt:
-            return prompt
-
-        fallback_path = self._fallback_dir / f"{prompt_id}.txt"
-        if fallback_path.exists():
-            logger.warning("langfuse_unavailable_using_fallback", extra={"prompt_id": prompt_id})
-            return fallback_path.read_text(encoding="utf-8").strip()
+            return await self._langfuse.get_prompt(prompt_id)
+        except LangfuseUnavailableError:
+            fallback_prompt = self._langfuse.load_fallback_prompt(prompt_id)
+            if fallback_prompt:
+                logger.warning(
+                    "langfuse_unavailable_using_fallback trace_id=%s prompt_id=%s",
+                    get_current_trace_id(),
+                    prompt_id,
+                )
+                return fallback_prompt
         raise PromptNotResolvableError(prompt_id)
 
     async def resolve_optional_prompt(self, prompt_id: str) -> str:
@@ -102,16 +101,3 @@ class PromptService:
     async def resolve_agent_prompt(self, *, session: AsyncSession, version, context: RequestContext) -> str:
         del session, version, context
         return await self.resolve_optional_prompt("agent_prompt")
-
-    async def _resolve_prompt_from_langfuse(self, prompt_id: str) -> str | None:
-        headers = {"Authorization": f"Bearer {self._langfuse_secret}"}
-        async with httpx.AsyncClient(base_url=self._langfuse_base_url, timeout=5.0) as client:
-            response = await client.get(f"/api/public/prompts/{prompt_id}", headers=headers)
-            response.raise_for_status()
-        payload = response.json()
-        prompt = payload.get("prompt")
-        if isinstance(prompt, str) and prompt.strip():
-            return prompt.strip()
-        if isinstance(payload.get("text"), str) and payload["text"].strip():
-            return payload["text"].strip()
-        return None

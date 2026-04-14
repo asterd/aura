@@ -11,6 +11,7 @@ from aura.domain.contracts import AgentRunRequest, InternalEvent, RequestContext
 from aura.services.agent_service import AgentService
 from aura.services.registry_service import RegistryService
 from aura.services.trigger_scheduler_service import TriggerSchedulerService
+from aura.utils.observability import record_job_failure, record_job_success, record_trace_event
 
 
 async def agent_run_job(
@@ -23,15 +24,24 @@ async def agent_run_job(
 ) -> None:
     del ctx
     tenant_uuid = UUID(tenant_id)
+    trace_id = str(uuid4())
+    record_trace_event(trace_id, f"agent_run_job:{agent_name}:started")
     async with AsyncSessionLocal() as session:
         async with session.begin():
             await set_tenant_rls(session, tenant_uuid)
             service = AgentService()
-            await service.run_agent(
-                session=session,
-                request=AgentRunRequest(agent_name=agent_name, agent_version=agent_version, input=input_data),
-                context=_service_context(tenant_uuid, user_id=UUID(user_id) if user_id else uuid4()),
-            )
+            try:
+                await service.run_agent(
+                    session=session,
+                    request=AgentRunRequest(agent_name=agent_name, agent_version=agent_version, input=input_data),
+                    context=_service_context(tenant_uuid, user_id=UUID(user_id) if user_id else uuid4(), trace_id=trace_id),
+                )
+                record_job_success(job_type="agent-run", queue="default")
+                record_trace_event(trace_id, f"agent_run_job:{agent_name}:completed")
+            except Exception:
+                record_job_failure(job_type="agent-run", queue="default")
+                record_trace_event(trace_id, f"agent_run_job:{agent_name}:failed")
+                raise
 
 
 async def dispatch_registered_crons_job(ctx: dict) -> None:
@@ -77,11 +87,11 @@ async def execute_event_triggered_run(ctx: dict, tenant_id: str, event_payload: 
             registration.last_run_at = datetime.now(UTC)
 
 
-def _service_context(tenant_id: UUID, *, user_id: UUID) -> RequestContext:
+def _service_context(tenant_id: UUID, *, user_id: UUID, trace_id: str | None = None) -> RequestContext:
     now = datetime.now(UTC)
     return RequestContext(
         request_id=str(uuid4()),
-        trace_id=str(uuid4()),
+        trace_id=trace_id or str(uuid4()),
         tenant_id=tenant_id,
         identity=UserIdentity(
             user_id=user_id,

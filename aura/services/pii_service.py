@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aura.domain.contracts import DetectedEntity, PiiMode, PiiPolicy, PiiTransformResult, RequestContext
 from aura.services.policy_service import PolicyService
+from aura.utils.observability import record_pii_transform_error
 
 try:
     from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerRegistry
@@ -131,6 +132,10 @@ class PiiService:
             return self._raw_result(text=text, mode=PiiMode.off)
 
         if effective_policy.mode == PiiMode.pseudonymize_rehydratable:
+            record_pii_transform_error(
+                mode=effective_policy.mode.value,
+                tenant_id=self._policy_tenant_id(effective_policy),
+            )
             raise NotImplementedError("mode not implemented in baseline")
 
         detections = self._detect_entities_batch([text], effective_policy)[0]
@@ -199,8 +204,13 @@ class PiiService:
             try:
                 return [self._detect_with_presidio(text, policy) for text in texts]
             except Exception:
+                record_pii_transform_error(mode=policy.mode.value, tenant_id=self._policy_tenant_id(policy))
                 logger.warning("presidio_detection_failed_falling_back_to_regex")
         return [self._detect_with_regex(text, policy) for text in texts]
+
+    def _policy_tenant_id(self, policy: PiiPolicy) -> str:
+        tenant_id = getattr(policy, "tenant_id", None)
+        return str(tenant_id) if tenant_id is not None else "unknown"
 
     def _detect_with_presidio(self, text: str, policy: PiiPolicy) -> list[_Detection]:
         if self._analyzer is None:

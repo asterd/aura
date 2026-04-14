@@ -20,6 +20,7 @@ from aura.adapters.s3.client import S3Client
 from aura.adapters.sandbox.provider import SandboxProvider
 from aura.domain.contracts import ConnectorCredentials, McpToolDefinition, McpToolResult, RequestContext, SandboxInput, SandboxResult
 from aura.services.policy_service import PolicyService
+from aura.utils.observability import record_sandbox_wall_time
 from aura.utils.secrets import EnvSecretStore, SecretStore, resolve_credentials
 
 
@@ -242,7 +243,9 @@ class SkillService:
             profile=policy,
             trace_id=context.trace_id,
         )
-        return await self._sandbox.run(sandbox_input)
+        result = await self._sandbox.run(sandbox_input)
+        record_sandbox_wall_time(skill_name=skill_name, status=result.status, wall_time_s=result.wall_time_s)
+        return result
 
     async def resolve_skill_version(
         self,

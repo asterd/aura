@@ -13,20 +13,27 @@ from aura.adapters.db.models import Tenant
 from aura.adapters.db.session import AsyncSessionLocal
 from aura.domain.contracts import JobPayload
 from aura.services.identity_sync_service import IdentitySyncService
+from aura.utils.observability import record_job_failure, record_job_success, record_trace_event, set_current_trace_id
 
 
 identity_sync_service = IdentitySyncService()
 
 
 async def identity_sync_job(ctx: dict, payload: dict, tenant_id: str) -> dict:
-    JobPayload.model_validate(payload)
+    job_payload = JobPayload.model_validate(payload)
+    set_current_trace_id(job_payload.trace_id)
+    record_trace_event(job_payload.trace_id or "", f"identity_sync_job:{tenant_id}:started")
     try:
         result = await identity_sync_service.sync_tenant(tenant_id=UUID(tenant_id))
     except Exception:
+        record_job_failure(job_type="identity-sync", queue="default")
+        record_trace_event(job_payload.trace_id or "", f"identity_sync_job:{tenant_id}:failed")
         job_try = int(ctx.get("job_try") or 1)
         if job_try < 5:
             raise Retry(defer=60 * (2 ** (job_try - 1)))
         raise
+    record_job_success(job_type="identity-sync", queue="default")
+    record_trace_event(job_payload.trace_id or "", f"identity_sync_job:{tenant_id}:completed")
     return result.model_dump(mode="json")
 
 

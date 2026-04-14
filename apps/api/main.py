@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import boto3
 import httpx
@@ -12,8 +13,8 @@ from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
 from redis.asyncio import from_url as redis_from_url
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context, identity_middleware
@@ -28,9 +29,18 @@ from apps.api.routers.skills import router as skills_router
 from apps.api.routers.webhooks import router as webhooks_router
 from aura.adapters.sandbox.factory import get_default as get_default_sandbox_provider
 from aura.adapters.db.session import AsyncSessionLocal
+from aura.adapters.db.models import Group
+from aura.adapters.db.models import User as DbUser
 from aura.domain.contracts import RequestContext, UserIdentity
 from aura.domain.models import User
-from aura.utils.observability import get_gauge_value
+from aura.utils.observability import (
+    get_gauge_value,
+    init_otel,
+    instrument_fastapi,
+    instrument_sqlalchemy,
+    record_request_latency,
+    set_current_trace_id,
+)
 
 
 class HealthResponse(BaseModel):
@@ -55,6 +65,28 @@ app.include_router(datasources_router)
 app.include_router(webhooks_router)
 app.include_router(skills_router)
 app.include_router(mcp_router)
+
+init_otel("aura-api", settings.otlp_endpoint)
+instrument_sqlalchemy()
+instrument_fastapi(app)
+health_engine = create_async_engine(settings.migration_database_url, pool_pre_ping=True)
+
+
+@app.middleware("http")
+async def observability_middleware(request, call_next):
+    trace_id = request.headers.get("X-Trace-Id") or str(uuid4())
+    request.state.trace_id = trace_id
+    set_current_trace_id(trace_id)
+    started = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Trace-Id"] = trace_id
+    record_request_latency(
+        endpoint=request.url.path,
+        method=request.method,
+        status=response.status_code,
+        latency_ms=(time.perf_counter() - started) * 1000.0,
+    )
+    return response
 
 
 async def _check_postgres() -> Literal["ok", "degraded"]:
@@ -120,6 +152,20 @@ async def _check_okta_jwks() -> Literal["ok", "degraded"]:
         return "degraded"
 
 
+async def _identity_sync_freshness_seconds() -> float:
+    try:
+        async with health_engine.connect() as connection:
+            user_synced_at = await connection.scalar(select(DbUser.synced_at).order_by(DbUser.synced_at.desc()).limit(1))
+            group_synced_at = await connection.scalar(select(Group.synced_at).order_by(Group.synced_at.desc()).limit(1))
+    except Exception:
+        return get_gauge_value("aura.identity.sync_freshness_s")
+
+    latest_synced_at = max((value for value in (user_synced_at, group_synced_at) if value is not None), default=None)
+    if latest_synced_at is None:
+        return get_gauge_value("aura.identity.sync_freshness_s")
+    return max(0.0, (time.time() - latest_synced_at.timestamp()))
+
+
 @app.get(f"{settings.api_prefix}/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     sandbox_provider = get_default_sandbox_provider()
@@ -139,11 +185,13 @@ async def health() -> HealthResponse:
         for name, value in raw_results.items()
     }
     status: Literal["ok", "degraded"] = "ok" if all(value == "ok" for value in results.values()) else "degraded"
+    identity_sync_freshness = await _identity_sync_freshness_seconds()
     return HealthResponse(
         status=status,
         components=results,
         metrics={
             "aura.datasource.stale_count": get_gauge_value("aura.datasource.stale_count"),
+            "aura.identity.sync_freshness_s": identity_sync_freshness,
         },
     )
 
