@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Literal
@@ -206,6 +207,26 @@ class ResolvedCredentials(BaseModel):
     extra: dict = Field(default_factory=dict)
 
 
+class McpServerCapabilities(BaseModel):
+    tools: list[str] = Field(default_factory=list)
+    tenant_id: UUID
+    identity_sub: str
+    server_version: str
+
+
+class McpToolDefinition(BaseModel):
+    name: str
+    description: str
+    input_schema: dict = Field(default_factory=dict)
+
+
+class McpToolResult(BaseModel):
+    tool_name: str
+    content: list[dict] = Field(default_factory=list)
+    is_error: bool = False
+    error_message: str | None = None
+
+
 class Citation(BaseModel):
     citation_id: str
     document_id: UUID
@@ -335,6 +356,7 @@ class AgentDeps:
     knowledge_service: Any
     artifact_writer: Any
     resolve_system_prompt: Callable[[str], str]
+    mcp_adapters: dict[str, "McpBridgeAdapter"] = field(default_factory=dict)
 
 
 class AgentInvocation(BaseModel):
@@ -406,6 +428,31 @@ class JobPayload(BaseModel):
     job_key: str
     requested_by_user_id: UUID | None = None
     trace_id: str | None = None
+
+
+class SandboxInput(BaseModel):
+    skill_version_id: UUID
+    artifact_ref: str
+    entrypoint: str
+    input_obj: dict = Field(default_factory=dict)
+    profile: SandboxPolicy
+    trace_id: str
+
+
+class SandboxArtifact(BaseModel):
+    name: str
+    content_type: str
+    size_bytes: int
+    s3_ref: str
+
+
+class SandboxResult(BaseModel):
+    status: Literal["succeeded", "failed", "timeout"]
+    output: dict | None = None
+    error_message: str | None = None
+    artifacts: list[SandboxArtifact] = Field(default_factory=list)
+    wall_time_s: float
+    exit_code: int | None = None
 
 
 class IdentitySyncResult(BaseModel):

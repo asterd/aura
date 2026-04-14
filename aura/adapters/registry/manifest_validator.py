@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from aura.domain.contracts import CronTrigger, EventTrigger
+from aura.utils.archive import UnsafeArchiveError, extract_zip_safely
 
 
 class ManifestValidationError(ValueError):
@@ -51,7 +52,10 @@ class ManifestValidator:
         errors = self._collect_errors(parsed)
         smoke_test_passed = False
         if not errors:
-            smoke_test_passed = self._smoke_test_import(zip_bytes=zip_bytes, entrypoint=str(parsed["entrypoint"]))
+            try:
+                smoke_test_passed = self._smoke_test_import(zip_bytes=zip_bytes, entrypoint=str(parsed["entrypoint"]))
+            except ValueError as exc:
+                errors.append({"field": "artifact", "message": str(exc)})
             if parsed.get("status") == "published" and not smoke_test_passed:
                 errors.append({"field": "status", "message": "Manifest cannot declare published when smoke test fails."})
 
@@ -125,7 +129,10 @@ class ManifestValidator:
             archive_path = Path(temp_dir) / "artifact.zip"
             archive_path.write_bytes(zip_bytes)
             with zipfile.ZipFile(archive_path) as archive:
-                archive.extractall(temp_dir)
+                try:
+                    extract_zip_safely(archive, temp_dir)
+                except UnsafeArchiveError as exc:
+                    raise ValueError(str(exc)) from exc
             build_fn = RuntimeLoader().load_build_fn_from_directory(Path(temp_dir), entrypoint)
             signature = inspect.signature(build_fn)
             return len(signature.parameters) == 1

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     okta_audience: str = Field(default="api://default", alias="OKTA_AUDIENCE")
     langfuse_base_url: AnyHttpUrl = Field(alias="LANGFUSE_BASE_URL")
     langfuse_secret_key: SecretStr = Field(alias="LANGFUSE_SECRET_KEY")
+    sandbox_provider: str = Field(default="docker", alias="SANDBOX_PROVIDER")
+    sandbox_docker_binary: str = Field(default="docker", alias="SANDBOX_DOCKER_BINARY")
+    sandbox_default_python_image: str = Field(default="python:3.12-slim", alias="SANDBOX_DEFAULT_PYTHON_IMAGE")
+    mcp_client_timeout_s: int = Field(default=30, alias="MCP_CLIENT_TIMEOUT_S")
     postgres_connect_timeout_s: float = 5.0
     service_check_timeout_s: float = 5.0
     api_prefix: str = "/api/v1"

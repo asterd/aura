@@ -22,8 +22,11 @@ from apps.api.routers.agents import router as agents_router
 from apps.api.routers.chat import router as chat_router
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.datasources import router as datasources_router
+from apps.api.routers.mcp import router as mcp_router
 from apps.api.routers.spaces import router as spaces_router
+from apps.api.routers.skills import router as skills_router
 from apps.api.routers.webhooks import router as webhooks_router
+from aura.adapters.sandbox.factory import get_default as get_default_sandbox_provider
 from aura.adapters.db.session import AsyncSessionLocal
 from aura.domain.contracts import RequestContext, UserIdentity
 from aura.domain.models import User
@@ -50,6 +53,8 @@ app.include_router(conversations_router)
 app.include_router(spaces_router)
 app.include_router(datasources_router)
 app.include_router(webhooks_router)
+app.include_router(skills_router)
+app.include_router(mcp_router)
 
 
 async def _check_postgres() -> Literal["ok", "degraded"]:
@@ -117,6 +122,7 @@ async def _check_okta_jwks() -> Literal["ok", "degraded"]:
 
 @app.get(f"{settings.api_prefix}/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
+    sandbox_provider = get_default_sandbox_provider()
     component_checks = {
         "postgres": _check_postgres(),
         "redis": _check_redis(),
@@ -125,8 +131,13 @@ async def health() -> HealthResponse:
         "litellm": _check_http(str(settings.litellm_base_url), ("/health/readiness", "/health", "/")),
         "okta": _check_okta_jwks(),
         "langfuse": _check_http(str(settings.langfuse_base_url), ("/api/public/health", "/api/health", "/")),
+        "sandbox": sandbox_provider.health_check(),
     }
-    results = {name: await check for name, check in component_checks.items()}
+    raw_results = {name: await check for name, check in component_checks.items()}
+    results = {
+        name: value if isinstance(value, str) else ("ok" if value else "down")
+        for name, value in raw_results.items()
+    }
     status: Literal["ok", "degraded"] = "ok" if all(value == "ok" for value in results.values()) else "degraded"
     return HealthResponse(
         status=status,

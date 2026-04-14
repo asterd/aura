@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from aura.adapters.s3.client import S3Client
+from aura.utils.archive import UnsafeArchiveError, extract_zip_safely
 
 
 class RuntimeLoaderError(RuntimeError):
@@ -32,7 +33,10 @@ class RuntimeLoader:
             archive_path = temp_dir / "artifact.zip"
             archive_path.write_bytes(raw_zip)
             with zipfile.ZipFile(archive_path) as archive:
-                archive.extractall(temp_dir)
+                try:
+                    extract_zip_safely(archive, temp_dir)
+                except UnsafeArchiveError as exc:
+                    raise RuntimeLoaderError(str(exc)) from exc
             build_fn = self.load_build_fn_from_directory(temp_dir, entrypoint)
             setattr(build_fn, "__aura_temp_dir__", str(temp_dir))
             return build_fn
@@ -46,6 +50,8 @@ class RuntimeLoader:
             raise RuntimeLoaderError("Entrypoint must use the format path.py:function_name.")
 
         module_path = (base_dir / module_path_str).resolve()
+        if base_dir.resolve() not in module_path.parents and module_path != base_dir.resolve():
+            raise RuntimeLoaderError("Entrypoint must stay inside the extracted artifact directory.")
         if not module_path.exists():
             raise RuntimeLoaderError(f"Entrypoint module not found: {module_path_str}")
 

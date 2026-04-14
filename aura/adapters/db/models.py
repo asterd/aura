@@ -365,6 +365,15 @@ class AgentPackage(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class SkillPackage(Base):
+    __tablename__ = "skill_packages"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_skill_packages_tenant_name"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class AgentVersion(Base):
     __tablename__ = "agent_versions"
     __table_args__ = (
@@ -395,6 +404,28 @@ class AgentVersion(Base):
     max_budget_usd: Mapped[float | None] = mapped_column(Numeric(10, 4))
     timeout_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("120"))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SkillVersion(Base):
+    __tablename__ = "skill_versions"
+    __table_args__ = (
+        CheckConstraint("status IN ('draft','validated','published','deprecated')", name="ck_skill_versions_status"),
+        UniqueConstraint("skill_package_id", "version", name="uq_skill_versions_package_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    skill_package_id: Mapped[UUID] = mapped_column(ForeignKey("skill_packages.id"), nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    version: Mapped[str] = mapped_column(Text, nullable=False)
+    entrypoint: Mapped[str] = mapped_column(Text, nullable=False)
+    manifest: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    artifact_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    sandbox_policy_id: Mapped[UUID | None] = mapped_column(ForeignKey("sandbox_policies.id"))
+    timeout_s: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("120"))
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

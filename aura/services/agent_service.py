@@ -20,6 +20,7 @@ from aura.services.policy_service import PolicyService
 from aura.services.prompt_service import PromptService
 from aura.services.registry_service import RegistryService, ResolvedAgentVersion
 from aura.services.retrieval import RetrievalService
+from aura.services.skill_service import SkillService
 from aura.adapters.s3.client import S3Client
 
 
@@ -76,6 +77,7 @@ class AgentService:
         retrieval_service: RetrievalService | None = None,
         audit_service: AuditService | None = None,
         s3_client: S3Client | None = None,
+        skill_service: SkillService | None = None,
     ) -> None:
         self._registry = registry_service or RegistryService()
         self._authz = authz_service or AuthzService()
@@ -86,6 +88,7 @@ class AgentService:
         self._retrieval = retrieval_service or RetrievalService()
         self._audit = audit_service or AuditService()
         self._s3 = s3_client or S3Client()
+        self._skills = skill_service or SkillService()
 
     async def run_agent(
         self,
@@ -110,6 +113,11 @@ class AgentService:
         system_prompt = await self._prompt.resolve_agent_prompt(session=session, version=version, context=context)
 
         artifact_writer = _RunArtifactWriter(self._s3)
+        mcp_adapters = await self._skills.resolve_mcp_adapters(
+            session=session,
+            tenant_id=context.tenant_id,
+            allowed_tools=version.allowed_tools,
+        )
         deps = AgentDeps(
             identity=context.identity,
             model_policy=model_policy,
@@ -121,6 +129,7 @@ class AgentService:
             knowledge_service=_AgentKnowledgeService(self._retrieval, session, context),
             artifact_writer=artifact_writer,
             resolve_system_prompt=lambda _: system_prompt,
+            mcp_adapters=mcp_adapters,
         )
 
         artifact_ref = await self._registry.get_runtime_artifact_ref(session, version)
