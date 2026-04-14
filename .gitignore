@@ -27,10 +27,12 @@ __pycache__/
 htmlcov/
 
 # Packaging / build artifacts
+node_modules/
 build/
 dist/
 site/
 .eggs/
+.next/
 *.egg
 *.egg-info/
 pip-wheel-metadata/
