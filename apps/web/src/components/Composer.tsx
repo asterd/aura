@@ -12,6 +12,7 @@ import {
 import { useAuraStore } from "@/lib/store";
 import { streamChat, uploadFile } from "@/lib/api";
 import type { AgentSummary, Space, Message, ChatStreamEvent } from "@/lib/types";
+import { SpaceSelector } from "./SpaceSelector";
 
 const MAX_CHARS = 32_000;
 
@@ -190,7 +191,7 @@ export function Composer({ threadId, onNewThread }: Props) {
     if (!files) return;
     const spaceId = currentSpaceIds[0];
     if (!spaceId) {
-      alert("Select a space before uploading files.");
+      alert("Select a Knowledge Space (using the space selector below) before uploading files.");
       return;
     }
     Array.from(files).forEach((file) => {
@@ -235,10 +236,6 @@ export function Composer({ threadId, onNewThread }: Props) {
   const submit = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
-    if (currentSpaceIds.length === 0) {
-      alert("Select at least one space before sending.");
-      return;
-    }
 
     if (trimmed.startsWith("/") && handleSlashCommand(trimmed)) {
       setText("");
@@ -472,6 +469,38 @@ export function Composer({ threadId, onNewThread }: Props) {
         </div>
       )}
 
+      {/* Space selector + active agents toolbar */}
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <SpaceSelector
+          spaces={availableSpaces}
+          selectedIds={currentSpaceIds}
+          onChange={(ids) => {
+            if (threadId) {
+              setActiveSpaceIds(threadId, ids);
+            } else {
+              setDraftSpaceIds(ids);
+            }
+          }}
+          disabled={isStreaming}
+        />
+        {currentAgentIds.length > 0 && (
+          <span
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
+            style={{
+              backgroundColor: "var(--surface-raised)",
+              border: "1px solid var(--border)",
+              color: "var(--muted-foreground)",
+            }}
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
+            </svg>
+            {currentAgentIds.length} agent{currentAgentIds.length !== 1 ? "s" : ""} active
+          </span>
+        )}
+      </div>
+
       {/* Main composer */}
       <div
         className="flex items-end gap-2 rounded-xl px-3 py-2"
@@ -507,7 +536,9 @@ export function Composer({ threadId, onNewThread }: Props) {
           placeholder={
             isStreaming
               ? "Waiting for response..."
-              : "Message AURA — @ for agents, # for spaces, / for commands"
+              : currentSpaceIds.length > 0
+              ? "Message AURA — @ for agents, # for spaces, / for commands"
+              : "Free chat — no knowledge space active. Use @ for agents, # to add a space."
           }
           disabled={isStreaming}
           rows={1}

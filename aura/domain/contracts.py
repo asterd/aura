@@ -90,6 +90,95 @@ class ModelPolicy(BaseModel):
     updated_at: datetime
 
 
+class ProviderStatus(str, Enum):
+    active = "active"
+    disabled = "disabled"
+    deprecated = "deprecated"
+
+
+class TenantCredentialStatus(str, Enum):
+    active = "active"
+    disabled = "disabled"
+
+
+class TenantModelStatus(str, Enum):
+    enabled = "enabled"
+    disabled = "disabled"
+
+
+class LlmTaskType(str, Enum):
+    chat = "chat"
+    embedding = "embedding"
+    rerank = "rerank"
+    agent = "agent"
+
+
+class BudgetScope(str, Enum):
+    tenant = "tenant"
+    user = "user"
+    provider = "provider"
+    space = "space"
+
+
+class BudgetWindow(str, Enum):
+    daily = "daily"
+    monthly = "monthly"
+
+
+class BudgetAction(str, Enum):
+    block = "block"
+    warn_only = "warn_only"
+
+
+class LlmProvider(BaseModel):
+    id: UUID
+    provider_key: str
+    display_name: str
+    description: str | None = None
+    supports_chat: bool = False
+    supports_embeddings: bool = False
+    supports_reasoning: bool = False
+    supports_tools: bool = False
+    base_url_hint: str | None = None
+    status: ProviderStatus = ProviderStatus.active
+    created_at: datetime
+    updated_at: datetime
+
+
+class TenantProviderCredential(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    provider_id: UUID
+    name: str
+    secret_ref: str
+    endpoint_override: str | None = None
+    is_default: bool = False
+    status: TenantCredentialStatus = TenantCredentialStatus.active
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class TenantModelConfig(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    provider_id: UUID
+    credential_id: UUID
+    alias: str | None = None
+    model_name: str
+    litellm_model_name: str | None = None
+    task_type: LlmTaskType
+    rate_limit_rpm: int | None = None
+    concurrency_limit: int | None = None
+    input_cost_per_1k: float | None = None
+    output_cost_per_1k: float | None = None
+    is_default: bool = False
+    status: TenantModelStatus = TenantModelStatus.enabled
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 class PiiMode(str, Enum):
     off = "off"
     detect_only = "detect_only"
@@ -250,18 +339,18 @@ class RetrievalRequest(BaseModel):
 
 
 class RetrievalResult(BaseModel):
-    query: str
-    context_blocks: list[str]
-    citations: list[Citation]
-    retrieval_profile_id: UUID
-    total_candidates: int
-    used_candidates: int
+    query: str = ""
+    context_blocks: list[str] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list)
+    retrieval_profile_id: UUID | None = None
+    total_candidates: int = 0
+    used_candidates: int = 0
 
 
 class ChatRequest(BaseModel):
     conversation_id: UUID | None = None
     message: str
-    space_ids: list[UUID]
+    space_ids: list[UUID] = Field(default_factory=list)
     additional_instructions: str | None = None
     active_agent_ids: list[UUID] = Field(default_factory=list)
     retrieval_profile_id: UUID | None = None
@@ -464,6 +553,36 @@ class IdentitySyncResult(BaseModel):
     unmapped_users: int
     partial_failures: int
     completed_at: datetime
+
+
+class CostBudget(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    scope_type: BudgetScope
+    scope_ref: str
+    provider_id: UUID | None = None
+    model_name: str | None = None
+    window: BudgetWindow
+    soft_limit_usd: float | None = None
+    hard_limit_usd: float
+    action_on_hard_limit: BudgetAction = BudgetAction.block
+    is_active: bool = True
+
+
+class LlmUsageRecord(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    user_id: UUID | None = None
+    provider_id: UUID
+    model_name: str
+    task_type: LlmTaskType
+    space_id: UUID | None = None
+    conversation_id: UUID | None = None
+    agent_run_id: UUID | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    measured_at: datetime
 
 
 ChatRequest.model_rebuild()

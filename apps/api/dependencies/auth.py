@@ -8,7 +8,7 @@ from starlette.responses import Response
 
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.contracts import RequestContext, UserIdentity
-from aura.services.identity import build_request_context, validate_jwt
+from aura.services.identity import build_request_context, validate_token
 from aura.utils.observability import set_current_trace_id
 
 
@@ -34,9 +34,9 @@ async def identity_middleware(request: Request, call_next) -> Response:
         if token is None:
             return await call_next(request)
 
-        claims = await validate_jwt(token)
         async with AsyncSessionLocal() as session:
             async with session.begin():
+                claims = await validate_token(session, token)
                 await set_tenant_rls(session, claims.tenant_id)
                 context = await build_request_context(
                     session,

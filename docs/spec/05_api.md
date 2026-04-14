@@ -89,4 +89,78 @@ class MeResponse(BaseModel):
     active_policies: dict[str, UUID]  # model_policy_id, pii_policy_id, etc.
 ```
 
+### 21.9 `GET /api/v1/admin/llm/providers`
+
+Lista provider supportati dal backbone.
+
+### 21.10 `POST /api/v1/admin/llm/credentials`
+
+Registra una credential tenant-level tramite `secret_ref`.
+
+### 21.11 `GET /api/v1/admin/llm/credentials`
+
+Lista credential censite per il tenant corrente.
+
+### 21.12 `POST /api/v1/admin/llm/models`
+
+Abilita un modello tenant-level per uno specifico task type.
+
+### 21.13 `GET /api/v1/admin/llm/models`
+
+Lista modelli abilitati per il tenant corrente.
+
+### 21.14 `POST /api/v1/admin/llm/budgets`
+
+Crea o aggiorna un budget di costo per tenant, utente, provider o progetto/spazio.
+
+### 21.15 `GET /api/v1/admin/llm/budgets`
+
+Lista budget attivi per il tenant corrente.
+
+### 21.16 `GET /api/v1/admin/llm/usage`
+
+Restituisce usage aggregato e costo per tenant/provider/modello/scopo.
+
+### 21.17 `POST /api/v1/admin/tenants/provision`
+
+Crea un tenant con `auth_mode=okta` o `auth_mode=local`. Richiede `X-Bootstrap-Token`.
+
+### 21.18 `POST /api/v1/auth/local/login`
+
+Autentica un utente di un tenant `local` e restituisce un bearer JWT firmato internamente.
+
+### 21.19 `GET /api/v1/admin/tenants/current`
+
+Restituisce configurazione e auth mode del tenant corrente.
+
+### 21.20 `PATCH /api/v1/admin/tenants/current/auth`
+
+Aggiorna `display_name` e la configurazione auth del tenant corrente.
+
+Supporta:
+
+- switch `local -> okta`
+- switch `okta -> local`
+- bootstrap admin locale quando necessario
+
+### 21.21 `GET /api/v1/admin/tenants/local-users`
+
+Lista utenti locali registrati per il tenant corrente.
+
+### 21.22 `POST /api/v1/admin/tenants/local-users`
+
+Crea un nuovo utente locale tenant-scoped.
+
+### 21.23 `PATCH /api/v1/admin/tenants/local-users/{user_id}`
+
+Aggiorna ruoli, display name, password o stato attivo di un utente locale.
+
+### 21.24 `GET /api/v1/admin/llm/runtime-key`
+
+Restituisce lo stato della tenant runtime key LiteLLM sincronizzata da AURA.
+
+### 21.25 `POST /api/v1/admin/llm/runtime-key/sync`
+
+Forza una risincronizzazione della tenant runtime key sulle API admin di LiteLLM.
+
 ---

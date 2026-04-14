@@ -14,7 +14,11 @@ CREATE TABLE tenants (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
-    okta_org_id TEXT NOT NULL UNIQUE,
+    okta_org_id TEXT UNIQUE,
+    auth_mode TEXT NOT NULL DEFAULT 'okta' CHECK (auth_mode IN ('okta','local')),
+    okta_jwks_url TEXT,
+    okta_issuer TEXT,
+    okta_audience TEXT,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -50,6 +54,20 @@ CREATE TABLE user_group_memberships (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, group_id)
+);
+
+-- LOCAL_AUTH_USERS
+CREATE TABLE local_auth_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    email TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    roles TEXT[] NOT NULL DEFAULT '{}',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, email)
 );
 ```
 
@@ -414,6 +432,29 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO aura_app;
 CREATE ROLE aura_service;
 ALTER ROLE aura_service BYPASSRLS;
 -- aura_service è usato SOLO da Alembic e da script di admin. MAI dall'applicazione runtime.
+
+## 31.8 LLM provider governance
+
+Tabelle aggiuntive previste:
+
+- `llm_providers`
+- `tenant_provider_credentials`
+- `tenant_model_configs`
+- `cost_budgets`
+- `llm_usage_records`
+
+Vincoli minimi:
+
+- provider canonicale unico per `provider_key`
+- credential unica per `tenant_id + provider_id + name`
+- model config unica per `tenant_id + provider_id + task_type + model_name`
+- budget unico per `(tenant_id, scope_type, scope_ref, provider_id, model_name, window)`
+
+Regole:
+
+- `secret_ref` è persistito, mai la chiave in chiaro
+- tutte le tabelle tenant-scoped devono essere coperte da RLS
+- `llm_usage_records` deve supportare aggregazioni per tenant, user, provider, model e space
 ```
 
 > ⚠️ **Pitfall critico verificato in produzione**: il pattern più comune di fallimento RLS è eseguire l'applicazione con il ruolo che ha creato le tabelle (spesso `postgres` o il ruolo owner). In quel caso RLS non viene applicato e le query restituiscono dati cross-tenant senza errori. Testare sempre con il ruolo `aura_app` in CI, non con il ruolo di migration.

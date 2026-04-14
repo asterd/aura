@@ -367,6 +367,104 @@ class SandboxPolicy(BaseModel):
     updated_at: datetime
 ```
 
+### 8.12 LLM governance contracts
+
+```python
+# CONTRACT
+class LlmProvider(BaseModel):
+    id: UUID
+    provider_key: Literal[
+        "openai", "anthropic", "azure_openai", "google_vertex",
+        "bedrock", "mistral", "custom_openai_compatible"
+    ]
+    display_name: str
+    description: str | None = None
+    base_url: str | None = None
+    supports_chat: bool = True
+    supports_embeddings: bool = False
+    supports_reasoning: bool = False
+    supports_tools: bool = False
+    status: Literal["active", "disabled", "deprecated"] = "active"
+
+
+class TenantProviderCredential(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    provider_id: UUID
+    name: str
+    secret_ref: str
+    endpoint_override: str | None = None
+    is_default: bool = False
+    status: Literal["active", "disabled"] = "active"
+
+
+class TenantModelConfig(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    provider_id: UUID
+    credential_id: UUID
+    task_type: Literal["chat", "embedding", "rerank"]
+    model_name: str
+    model_alias: str | None = None
+    litellm_model_name: str | None = None
+    input_cost_per_1k: float | None = None
+    output_cost_per_1k: float | None = None
+    max_requests_per_minute: int | None = None
+    max_concurrent_requests: int | None = None
+    status: Literal["enabled", "disabled"] = "enabled"
+```
+
+### 8.13 Cost governance contracts
+
+```python
+# CONTRACT
+class BudgetScope(str, Enum):
+    tenant = "tenant"
+    user = "user"
+    provider = "provider"
+    space = "space"
+
+
+class BudgetWindow(str, Enum):
+    daily = "daily"
+    monthly = "monthly"
+
+
+class BudgetAction(str, Enum):
+    block = "block"
+    warn_only = "warn_only"
+
+
+class CostBudget(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    scope_type: BudgetScope
+    scope_ref: str
+    provider_id: UUID | None = None
+    model_name: str | None = None
+    window: BudgetWindow
+    soft_limit_usd: float | None = None
+    hard_limit_usd: float
+    action_on_hard_limit: BudgetAction = BudgetAction.block
+    is_active: bool = True
+
+
+class LlmUsageRecord(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    user_id: UUID | None = None
+    provider_id: UUID
+    model_name: str
+    task_type: Literal["chat", "embedding", "rerank", "agent"]
+    space_id: UUID | None = None
+    conversation_id: UUID | None = None
+    agent_run_id: UUID | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    measured_at: datetime
+```
+
 ### 8.12 ConnectorCredentials contract
 
 ```python

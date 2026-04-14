@@ -69,6 +69,106 @@ export interface MeResponse {
   active_policies: Record<string, unknown>;
 }
 
+export interface TenantAdminInfo {
+  tenant_id: string;
+  slug: string;
+  display_name: string;
+  auth_mode: string;
+  okta_org_id?: string;
+  okta_jwks_url?: string;
+  okta_issuer?: string;
+  okta_audience?: string;
+  status: string;
+}
+
+export interface LocalAdminUser {
+  id: string;
+  email: string;
+  display_name?: string;
+  roles: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LlmProvider {
+  id: string;
+  provider_key: string;
+  display_name: string;
+  description?: string;
+  supports_chat: boolean;
+  supports_embeddings: boolean;
+  supports_reasoning: boolean;
+  supports_tools: boolean;
+  base_url_hint?: string;
+  status: string;
+}
+
+export interface TenantCredential {
+  id: string;
+  provider_id: string;
+  provider_key: string;
+  name: string;
+  secret_ref: string;
+  endpoint_override?: string;
+  is_default: boolean;
+  status: string;
+}
+
+export interface TenantModelConfig {
+  id: string;
+  provider_id: string;
+  provider_key: string;
+  credential_id: string;
+  credential_name: string;
+  task_type: string;
+  model_name: string;
+  alias?: string;
+  litellm_model_name?: string;
+  input_cost_per_1k?: number;
+  output_cost_per_1k?: number;
+  rate_limit_rpm?: number;
+  concurrency_limit?: number;
+  is_default: boolean;
+  status: string;
+}
+
+export interface CostBudget {
+  id: string;
+  scope_type: string;
+  scope_ref: string;
+  provider_id?: string;
+  model_name?: string;
+  window: string;
+  soft_limit_usd?: number;
+  hard_limit_usd: number;
+  action_on_hard_limit: string;
+  is_active: boolean;
+}
+
+export interface UsageAggregate {
+  provider_id: string;
+  provider_key: string;
+  model_name: string;
+  task_type: string;
+  user_id?: string;
+  space_id?: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface RuntimeKeyState {
+  key_name: string;
+  models: string[];
+  max_budget_usd?: number;
+  rpm_limit?: number;
+  synced: boolean;
+  sync_mode: string;
+  error?: string;
+}
+
 export type ChatStreamEvent =
   | { type: "token"; content: string }
   | { type: "citation"; citation: Citation }

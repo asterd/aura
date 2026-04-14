@@ -23,6 +23,7 @@ Per ogni fase, leggere SOLO i file elencati nella sezione "File da leggere" del 
 | `docs/spec/09_triggered_agents.md` | Triggered & autonomous agents, cron/event triggers, webhook inbound (§36) |
 | `docs/spec/10_mcp_bridge.md` | MCP Bridge: AURA come MCP Server + skill mcp_client outbound (§37) |
 | `docs/spec/11_agent_chat_integration.md` | Agent-in-chat: @mention, AgentChatService, streaming eventi agente (§38) |
+| `docs/phases/phase_10_llm_governance.md` | LLM provider governance: provider registry, tenant keys, model enablement, budget gates |
 
 ---
 
@@ -130,6 +131,7 @@ Fase 6 → Connectors        (ConnectorWrapper, SecretStore, identity sync)
 Fase 7 → Agent Registry    (manifest, RegistryService, RuntimeLoader, AgentService)
 Fase 8 → Skills+Sandbox    (SandboxProvider, Docker, K8s)
 Fase 9 → Ops+Hardening     (Langfuse, OTel, degraded modes, load test)
+Fase 10 → LLM Governance   (provider registry, tenant keys, model enablement, budget gates)
 ```
 
 **REGOLA**: non iniziare la Fase N+1 prima che i test della Fase N siano verdi.

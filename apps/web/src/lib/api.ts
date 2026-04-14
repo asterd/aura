@@ -6,6 +6,14 @@ import type {
   Space,
   AgentSummary,
   MeResponse,
+  LlmProvider,
+  TenantCredential,
+  TenantModelConfig,
+  CostBudget,
+  UsageAggregate,
+  TenantAdminInfo,
+  LocalAdminUser,
+  RuntimeKeyState,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -66,6 +74,66 @@ export async function getMe(): Promise<MeResponse> {
   return apiFetch<MeResponse>("/me");
 }
 
+export async function localLogin(payload: {
+  tenant_slug: string;
+  email: string;
+  password: string;
+}): Promise<{ access_token: string; token_type: string }> {
+  return apiFetch<{ access_token: string; token_type: string }>("/auth/local/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function provisionTenant(
+  payload: Record<string, unknown>,
+  bootstrapToken: string
+): Promise<{
+  tenant_id: string;
+  slug: string;
+  display_name: string;
+  auth_mode: string;
+  bootstrap_admin_created: boolean;
+}> {
+  return apiFetch("/admin/tenants/provision", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: {
+      ...authHeaders(),
+      "X-Bootstrap-Token": bootstrapToken,
+    },
+  });
+}
+
+export async function getCurrentTenant(): Promise<TenantAdminInfo> {
+  return apiFetch<TenantAdminInfo>("/admin/tenants/current");
+}
+
+export async function updateCurrentTenantAuth(payload: Record<string, unknown>): Promise<TenantAdminInfo> {
+  return apiFetch<TenantAdminInfo>("/admin/tenants/current/auth", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getLocalUsers(): Promise<LocalAdminUser[]> {
+  return apiFetch<LocalAdminUser[]>("/admin/tenants/local-users");
+}
+
+export async function createLocalUser(payload: Record<string, unknown>): Promise<LocalAdminUser> {
+  return apiFetch<LocalAdminUser>("/admin/tenants/local-users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateLocalUser(id: string, payload: Record<string, unknown>): Promise<LocalAdminUser> {
+  return apiFetch<LocalAdminUser>(`/admin/tenants/local-users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 // ─── Spaces ────────────────────────────────────────────────────────────────
 export async function getSpaces(): Promise<Space[]> {
   const spaces = await apiFetch<ApiSpace[]>("/spaces");
@@ -79,6 +147,57 @@ export async function getSpaces(): Promise<Space[]> {
 // ─── Agents ────────────────────────────────────────────────────────────────
 export async function getAgents(): Promise<AgentSummary[]> {
   return apiFetch<ApiAgentSummary[]>("/agents");
+}
+
+export async function getLlmProviders(): Promise<LlmProvider[]> {
+  return apiFetch<LlmProvider[]>("/admin/llm/providers");
+}
+
+export async function getLlmCredentials(): Promise<TenantCredential[]> {
+  return apiFetch<TenantCredential[]>("/admin/llm/credentials");
+}
+
+export async function createLlmCredential(payload: Record<string, unknown>): Promise<TenantCredential> {
+  return apiFetch<TenantCredential>("/admin/llm/credentials", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getLlmModels(): Promise<TenantModelConfig[]> {
+  return apiFetch<TenantModelConfig[]>("/admin/llm/models");
+}
+
+export async function createLlmModel(payload: Record<string, unknown>): Promise<TenantModelConfig> {
+  return apiFetch<TenantModelConfig>("/admin/llm/models", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getLlmBudgets(): Promise<CostBudget[]> {
+  return apiFetch<CostBudget[]>("/admin/llm/budgets");
+}
+
+export async function createLlmBudget(payload: Record<string, unknown>): Promise<CostBudget> {
+  return apiFetch<CostBudget>("/admin/llm/budgets", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getLlmUsage(days = 30): Promise<{ items: UsageAggregate[] }> {
+  return apiFetch<{ items: UsageAggregate[] }>(`/admin/llm/usage?days=${days}`);
+}
+
+export async function getRuntimeKeyState(): Promise<RuntimeKeyState> {
+  return apiFetch<RuntimeKeyState>("/admin/llm/runtime-key");
+}
+
+export async function syncRuntimeKey(): Promise<RuntimeKeyState> {
+  return apiFetch<RuntimeKeyState>("/admin/llm/runtime-key/sync", {
+    method: "POST",
+  });
 }
 
 // ─── Conversations ─────────────────────────────────────────────────────────

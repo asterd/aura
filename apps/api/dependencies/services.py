@@ -8,8 +8,12 @@ from aura.services.agent_chat_service import AgentChatService
 from aura.services.agent_service import AgentService
 from aura.services.chat import ChatService
 from aura.services.conversation_service import ConversationService
+from aura.services.cost_management_service import CostManagementService
 from aura.services.datasource_service import DatasourceService
 from aura.services.event_dispatcher_service import EventDispatcherService
+from aura.services.llm_provider_service import LlmProviderService
+from aura.services.litellm_admin_service import LiteLLMAdminService
+from aura.services.llm_service import LlmService
 from aura.services.mcp_server_service import McpServerService
 from aura.services.registry_service import RegistryService
 from aura.services.retrieval import RetrievalService
@@ -26,10 +30,39 @@ def get_space_service() -> SpaceService:
     return SpaceService()
 
 
+def get_llm_provider_service() -> LlmProviderService:
+    return LlmProviderService()
+
+
+def get_cost_management_service() -> CostManagementService:
+    return CostManagementService()
+
+
+def get_litellm_admin_service(
+    llm_provider_service: LlmProviderService = Depends(get_llm_provider_service),
+    cost_management_service: CostManagementService = Depends(get_cost_management_service),
+) -> LiteLLMAdminService:
+    return LiteLLMAdminService(
+        llm_provider_service=llm_provider_service,
+        cost_management_service=cost_management_service,
+    )
+
+
+def get_llm_service(
+    llm_provider_service: LlmProviderService = Depends(get_llm_provider_service),
+    cost_management_service: CostManagementService = Depends(get_cost_management_service),
+) -> LlmService:
+    return LlmService(
+        llm_provider_service=llm_provider_service,
+        cost_management_service=cost_management_service,
+    )
+
+
 def get_chat_service(
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
+    llm_service: LlmService = Depends(get_llm_service),
 ) -> ChatService:
-    return ChatService(retrieval_service=retrieval_service)
+    return ChatService(retrieval_service=retrieval_service, llm_service=llm_service)
 
 
 def get_conversation_service() -> ConversationService:

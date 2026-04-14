@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { AdminConsole } from "@/components/AdminConsole";
 
 async function logout() {
   "use server";
@@ -14,27 +16,37 @@ export default async function SettingsPage() {
   if (!token?.value) redirect("/login");
 
   return (
-    <div className="flex flex-col h-full items-center justify-center gap-8" style={{ backgroundColor: "var(--background)" }}>
-      <div
-        className="w-full max-w-md p-8 rounded-xl"
-        style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
-      >
-        <h1 className="text-xl font-semibold mb-6" style={{ color: "var(--foreground)" }}>
-          Settings
-        </h1>
-
-        <div className="space-y-4">
+    <div className="h-full overflow-y-auto" style={{ backgroundColor: "var(--background)" }}>
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-8">
+        <div
+          className="flex flex-col gap-4 rounded-2xl p-6 md:flex-row md:items-center md:justify-between"
+          style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
+        >
           <div>
-            <p className="text-sm font-medium mb-1" style={{ color: "var(--foreground)" }}>
-              Authentication
+            <h1 className="text-2xl font-semibold" style={{ color: "var(--foreground)" }}>
+              Settings
+            </h1>
+            <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
+              Authentication, tenant provisioning and LiteLLM governance for the current workspace.
             </p>
-            <p className="text-xs mb-3" style={{ color: "var(--muted-foreground)" }}>
-              JWT token is stored in a secure httpOnly cookie and never accessible from JavaScript.
-            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/chat"
+              className="rounded-lg px-4 py-2 text-sm font-medium transition-opacity hover:opacity-80"
+              style={{
+                backgroundColor: "var(--surface-raised)",
+                border: "1px solid var(--border)",
+                color: "var(--foreground)",
+              }}
+            >
+              Back to chat
+            </Link>
             <form action={logout}>
               <button
                 type="submit"
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-opacity hover:opacity-80"
                 style={{
                   backgroundColor: "rgba(239,68,68,0.15)",
                   border: "1px solid rgba(239,68,68,0.4)",
@@ -46,6 +58,15 @@ export default async function SettingsPage() {
             </form>
           </div>
         </div>
+
+        <div
+          className="rounded-2xl p-4 text-xs"
+          style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted-foreground)" }}
+        >
+          JWT tokens remain stored in a secure httpOnly cookie. Local-auth tenant bootstrap requires the configured bootstrap token.
+        </div>
+
+        <AdminConsole />
       </div>
     </div>
   );

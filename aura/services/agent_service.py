@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import settings
 from aura.adapters.db.models import AgentRun
 from aura.adapters.runtime.loader import RuntimeLoader, RuntimeLoaderError
-from aura.domain.contracts import AgentDeps, AgentRunRequest, AgentRunResult, RequestContext, RetrievalRequest
+from aura.domain.contracts import AgentDeps, AgentRunRequest, AgentRunResult, LlmTaskType, RequestContext, RetrievalRequest
 from aura.services.audit_service import AuditService
 from aura.services.authz_service import AuthzService
+from aura.services.cost_management_service import CostManagementService, UsageContext
+from aura.services.llm_provider_service import LlmProviderService
 from aura.services.pii_service import PiiService
 from aura.services.policy_service import PolicyService
 from aura.services.prompt_service import PromptService
@@ -78,6 +80,8 @@ class AgentService:
         audit_service: AuditService | None = None,
         s3_client: S3Client | None = None,
         skill_service: SkillService | None = None,
+        llm_provider_service: LlmProviderService | None = None,
+        cost_management_service: CostManagementService | None = None,
     ) -> None:
         self._registry = registry_service or RegistryService()
         self._authz = authz_service or AuthzService()
@@ -89,6 +93,8 @@ class AgentService:
         self._audit = audit_service or AuditService()
         self._s3 = s3_client or S3Client()
         self._skills = skill_service or SkillService()
+        self._providers = llm_provider_service or LlmProviderService()
+        self._costs = cost_management_service or CostManagementService()
 
     async def run_agent(
         self,
@@ -111,6 +117,23 @@ class AgentService:
         model_policy = await self._policies.resolve_model_policy(session, version, context)
         pii_policy = await self._policies.resolve_pii_policy(session, version, context)
         system_prompt = await self._prompt.resolve_agent_prompt(session=session, version=version, context=context)
+        runtime = await self._providers.resolve_model(
+            session=session,
+            tenant_id=context.tenant_id,
+            requested_model=model_policy.default_model,
+            task_type=LlmTaskType.chat,
+        )
+        await self._costs.check_budget(
+            session=session,
+            context=context,
+            usage=UsageContext(
+                provider_id=runtime.provider_id,
+                provider_key=runtime.provider_key,
+                model_name=runtime.runtime_model_name,
+                task_type=LlmTaskType.agent,
+                space_id=version.allowed_space_ids[0] if version.allowed_space_ids else None,
+            ),
+        )
 
         artifact_writer = _RunArtifactWriter(self._s3)
         mcp_adapters = await self._skills.resolve_mcp_adapters(
@@ -162,6 +185,23 @@ class AgentService:
                 error_message=None,
                 artifact_refs=artifact_writer.artifact_refs,
             )
+            await self._costs.record_usage(
+                session=session,
+                context=context,
+                usage=UsageContext(
+                    provider_id=runtime.provider_id,
+                    provider_key=runtime.provider_key,
+                    model_name=runtime.runtime_model_name,
+                    task_type=LlmTaskType.agent,
+                    space_id=version.allowed_space_ids[0] if version.allowed_space_ids else None,
+                    conversation_id=request.conversation_id,
+                    agent_run_id=persisted.id,
+                    credential_id=runtime.credential_id,
+                ),
+                input_tokens=max(1, len(str(request.input).split())),
+                output_tokens=max(0, len(str(transformed_output).split())),
+                estimated_cost_usd=0,
+            )
             await self._audit.emit_agent_run(session=session, context=context, run_id=persisted.id)
             output_text = transformed_output if isinstance(transformed_output, str) else transformed_output.get("result")
             output_data = transformed_output if isinstance(transformed_output, dict) else None
@@ -187,6 +227,23 @@ class AgentService:
                 output=None,
                 error_message=f"{type(exc).__name__}: {exc}",
                 artifact_refs=artifact_writer.artifact_refs,
+            )
+            await self._costs.record_usage(
+                session=session,
+                context=context,
+                usage=UsageContext(
+                    provider_id=runtime.provider_id,
+                    provider_key=runtime.provider_key,
+                    model_name=runtime.runtime_model_name,
+                    task_type=LlmTaskType.agent,
+                    space_id=version.allowed_space_ids[0] if version.allowed_space_ids else None,
+                    conversation_id=request.conversation_id,
+                    agent_run_id=persisted.id,
+                    credential_id=runtime.credential_id,
+                ),
+                input_tokens=max(1, len(str(request.input).split())),
+                output_tokens=0,
+                estimated_cost_usd=0,
             )
             await self._audit.emit_agent_run(session=session, context=context, run_id=persisted.id)
             logger.exception("agent_run_failed agent=%s version=%s trace_id=%s", version.name, version.version, context.trace_id)

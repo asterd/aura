@@ -20,3 +20,9 @@ async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]
             request.state.db = session
             request.state.tenant_id = identity.tenant_id
             yield session
+
+
+async def get_unscoped_db_session() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            yield session

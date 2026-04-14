@@ -5,6 +5,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from decimal import Decimal
 import time
 from uuid import UUID
 
@@ -18,7 +19,9 @@ from apps.api.config import settings
 from aura.adapters.db.models import EmbeddingProfile, RetrievalProfile
 from aura.adapters.embeddings.litellm import LiteLLMEmbeddingClient
 from aura.adapters.qdrant.filter_builder import build_retrieval_filter
-from aura.domain.contracts import Citation, KnowledgeSpace, RequestContext, RetrievalRequest, RetrievalResult
+from aura.domain.contracts import Citation, KnowledgeSpace, LlmTaskType, RequestContext, RetrievalRequest, RetrievalResult
+from aura.services.cost_management_service import CostManagementService, UsageContext
+from aura.services.llm_provider_service import LlmProviderService
 from aura.services.space_service import SpaceService
 from aura.utils.observability import record_retrieval_latency
 
@@ -37,10 +40,14 @@ class RetrievalService:
         embedding_client: LiteLLMEmbeddingClient | None = None,
         qdrant_client: QdrantClient | None = None,
         space_service: SpaceService | None = None,
+        llm_provider_service: LlmProviderService | None = None,
+        cost_management_service: CostManagementService | None = None,
     ) -> None:
         self._embeddings = embedding_client or LiteLLMEmbeddingClient()
         self._qdrant = qdrant_client or QdrantClient(url=str(settings.qdrant_url))
         self._spaces = space_service or SpaceService()
+        self._providers = llm_provider_service or LlmProviderService()
+        self._costs = cost_management_service or CostManagementService()
 
     async def retrieve(
         self,
@@ -61,6 +68,34 @@ class RetrievalService:
         )
         query_text = request.query
         embedding_profile = await self._resolve_embedding_profile(session, authorized_spaces[0].embedding_profile_id)
+        runtime = await self._providers.resolve_model(
+            session=session,
+            tenant_id=context.tenant_id,
+            requested_model=embedding_profile.litellm_model,
+            task_type=LlmTaskType.embedding,
+        )
+        input_tokens = max(1, len(query_text.split()))
+        usage_context = UsageContext(
+            provider_id=runtime.provider_id,
+            provider_key=runtime.provider_key,
+            model_name=runtime.runtime_model_name,
+            task_type=LlmTaskType.embedding,
+            space_id=authorized_spaces[0].id,
+            conversation_id=request.conversation_id,
+            credential_id=runtime.credential_id,
+        )
+        projected_input_cost = self._costs.estimate_cost(
+            input_tokens=input_tokens,
+            output_tokens=0,
+            input_cost_per_1k=runtime.input_cost_per_1k,
+            output_cost_per_1k=Decimal("0"),
+        )
+        await self._costs.check_budget(
+            session=session,
+            context=context,
+            usage=usage_context,
+            projected_cost_usd=projected_input_cost,
+        )
         started = time.perf_counter()
         try:
             candidates = await self._hybrid_search(
@@ -68,6 +103,7 @@ class RetrievalService:
                 embedding_profile=embedding_profile,
                 retrieval_profile=retrieval_profile,
                 filter_obj=filter_obj,
+                runtime=runtime,
             )
         except HTTPException:
             raise
@@ -85,6 +121,19 @@ class RetrievalService:
         )
         context_blocks = [str(candidate.payload.get("chunk_text") or candidate.payload.get("title") or "") for candidate in selected]
         citations = [self._normalize_citation(index, candidate) for index, candidate in enumerate(selected, start=1)]
+        await self._costs.record_usage(
+            session=session,
+            context=context,
+            usage=usage_context,
+            input_tokens=input_tokens,
+            output_tokens=0,
+            estimated_cost_usd=self._costs.estimate_cost(
+                input_tokens=input_tokens,
+                output_tokens=0,
+                input_cost_per_1k=runtime.input_cost_per_1k,
+                output_cost_per_1k=Decimal("0"),
+            ),
+        )
         return RetrievalResult(
             query=request.query,
             context_blocks=context_blocks,
@@ -125,13 +174,16 @@ class RetrievalService:
         embedding_profile: EmbeddingProfile,
         retrieval_profile: RetrievalProfile,
         filter_obj: models.Filter,
+        runtime,
     ) -> list[_Candidate]:
         query_vector = (
             await self._embeddings.embed_texts(
-                model=embedding_profile.litellm_model,
+                model=runtime.runtime_model_name,
                 texts=[query],
                 dimensions=embedding_profile.dimensions,
                 batch_size=1,
+                provider_api_key=runtime.provider_api_key,
+                provider_base_url=runtime.provider_base_url,
             )
         )[0]
 

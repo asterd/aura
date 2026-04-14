@@ -13,8 +13,11 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
+from aura.adapters.db.session import set_tenant_rls
+from aura.adapters.db.models import Tenant
 from aura.domain.contracts import RequestContext, UserIdentity
-from aura.domain.models import Group, User, UserGroupMembership
+from aura.domain.models import Group, LocalAuthUser, User, UserGroupMembership
+from aura.utils.passwords import verify_password
 
 
 @dataclass(slots=True)
@@ -27,30 +30,44 @@ class ValidatedClaims:
     groups: list[str]
 
 
+@dataclass(slots=True)
+class TenantAuthConfig:
+    tenant_id: UUID
+    slug: str
+    auth_mode: str
+    issuer: str | None
+    audience: str | None
+    jwks_url: str | None
+
+
 class JwksCache:
     def __init__(self, ttl: timedelta = timedelta(hours=1)) -> None:
         self._ttl = ttl
         self._expires_at = datetime.min.replace(tzinfo=UTC)
-        self._keys: list[dict[str, object]] = []
+        self._keys_by_url: dict[str, tuple[datetime, list[dict[str, object]]]] = {}
 
-    async def get_keys(self) -> list[dict[str, object]]:
+    async def get_keys(self, jwks_url: str) -> list[dict[str, object]]:
         now = datetime.now(UTC)
-        if self._keys and now < self._expires_at:
-            return self._keys
+        cached = self._keys_by_url.get(jwks_url)
+        if cached is not None and now < cached[0]:
+            return cached[1]
 
         timeout = httpx.Timeout(settings.service_check_timeout_s)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(str(settings.okta_jwks_url))
+            response = await client.get(jwks_url)
             response.raise_for_status()
         payload = response.json()
-        self._keys = list(payload.get("keys", []))
-        self._expires_at = now + self._ttl
-        return self._keys
+        keys = list(payload.get("keys", []))
+        self._keys_by_url[jwks_url] = (now + self._ttl, keys)
+        return keys
 
-    async def get_signing_key(self, token: str) -> object:
+    async def get_signing_key(self, token: str, jwks_url: str) -> object:
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
-        keys = await self.get_keys()
+        try:
+            keys = await self.get_keys(jwks_url)
+        except TypeError:
+            keys = await self.get_keys()
 
         matching_key: dict[str, object] | None = None
         if kid is not None:
@@ -79,9 +96,9 @@ def _as_string_list(value: object) -> list[str]:
     raise _unauthorized("Invalid JWT claims.")
 
 
-def _extract_tenant_id(claims: dict[str, object]) -> UUID:
+def _extract_tenant_id(unverified_claims: dict[str, object]) -> UUID:
     for field_name in ("tenant_id", "tid"):
-        raw_value = claims.get(field_name)
+        raw_value = unverified_claims.get(field_name)
         if raw_value:
             try:
                 return UUID(str(raw_value))
@@ -90,28 +107,114 @@ def _extract_tenant_id(claims: dict[str, object]) -> UUID:
     raise _unauthorized("Missing tenant claim.")
 
 
-async def validate_jwt(token: str) -> ValidatedClaims:
+async def resolve_tenant_auth_config(session: AsyncSession, tenant_id: UUID) -> TenantAuthConfig:
+    tenant = await session.scalar(select(Tenant).where(Tenant.id == tenant_id))
+    if tenant is None:
+        raise _unauthorized("Unknown tenant.")
+    return TenantAuthConfig(
+        tenant_id=tenant.id,
+        slug=tenant.slug,
+        auth_mode=tenant.auth_mode,
+        issuer=tenant.okta_issuer or settings.okta_issuer,
+        audience=tenant.okta_audience or settings.okta_audience,
+        jwks_url=tenant.okta_jwks_url or str(settings.okta_jwks_url),
+    )
+
+
+async def validate_token(session: AsyncSession, token: str) -> ValidatedClaims:
     try:
-        signing_key = await jwks_cache.get_signing_key(token)
+        unverified_claims = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+    except InvalidTokenError as exc:
+        raise _unauthorized() from exc
+    tenant_id = _extract_tenant_id(unverified_claims)
+    auth_config = await resolve_tenant_auth_config(session, tenant_id)
+    if auth_config.auth_mode == "local":
+        return _validate_local_token(token, auth_config)
+    return await _validate_okta_token(token, auth_config)
+
+
+def _validate_local_token(token: str, auth_config: TenantAuthConfig) -> ValidatedClaims:
+    try:
         claims = jwt.decode(
             token,
-            key=signing_key,
-            algorithms=["HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
-            issuer=settings.okta_issuer,
-            audience=settings.okta_audience,
+            key=settings.local_auth_jwt_secret.get_secret_value(),
+            algorithms=["HS256"],
+            issuer=f"{settings.local_auth_jwt_issuer}:{auth_config.slug}",
+            audience=settings.local_auth_audience,
             options={"require": ["exp", "iss", "aud", "sub", "email"]},
         )
-    except (InvalidTokenError, httpx.HTTPError, KeyError, ValueError) as exc:
+    except (InvalidTokenError, ValueError) as exc:
         raise _unauthorized() from exc
-
     return ValidatedClaims(
-        tenant_id=_extract_tenant_id(claims),
+        tenant_id=auth_config.tenant_id,
         okta_sub=str(claims["sub"]),
         email=str(claims["email"]),
         display_name=str(claims["name"]) if claims.get("name") else None,
         roles=_as_string_list(claims.get("roles")),
         groups=_as_string_list(claims.get("groups")),
     )
+
+
+async def _validate_okta_token(token: str, auth_config: TenantAuthConfig) -> ValidatedClaims:
+    try:
+        signing_key = await jwks_cache.get_signing_key(token, auth_config.jwks_url or str(settings.okta_jwks_url))
+        claims = jwt.decode(
+            token,
+            key=signing_key,
+            algorithms=["HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+            issuer=auth_config.issuer,
+            audience=auth_config.audience,
+            options={"require": ["exp", "iss", "aud", "sub", "email"]},
+        )
+    except (InvalidTokenError, httpx.HTTPError, KeyError, ValueError) as exc:
+        raise _unauthorized() from exc
+
+    return ValidatedClaims(
+        tenant_id=auth_config.tenant_id,
+        okta_sub=str(claims["sub"]),
+        email=str(claims["email"]),
+        display_name=str(claims["name"]) if claims.get("name") else None,
+        roles=_as_string_list(claims.get("roles")),
+        groups=_as_string_list(claims.get("groups")),
+    )
+
+
+async def issue_local_access_token(
+    session: AsyncSession,
+    *,
+    tenant_slug: str,
+    email: str,
+    password: str,
+    expires_in: timedelta = timedelta(hours=8),
+) -> str:
+    tenant = await session.scalar(select(Tenant).where(Tenant.slug == tenant_slug))
+    if tenant is None or tenant.auth_mode != "local":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Local-auth tenant not found.")
+    await set_tenant_rls(session, tenant.id)
+    local_user = await session.scalar(
+        select(LocalAuthUser).where(
+            LocalAuthUser.tenant_id == tenant.id,
+            LocalAuthUser.email == email,
+            LocalAuthUser.is_active.is_(True),
+        )
+    )
+    if local_user is None or not verify_password(password, local_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+
+    now = datetime.now(UTC)
+    payload = {
+        "sub": f"local:{email.lower()}",
+        "iss": f"{settings.local_auth_jwt_issuer}:{tenant.slug}",
+        "aud": settings.local_auth_audience,
+        "iat": int(now.timestamp()),
+        "exp": int((now + expires_in).timestamp()),
+        "email": email.lower(),
+        "tenant_id": str(tenant.id),
+        "name": local_user.display_name,
+        "roles": list(local_user.roles or []),
+        "groups": [],
+    }
+    return jwt.encode(payload, settings.local_auth_jwt_secret.get_secret_value(), algorithm="HS256")
 
 
 async def _resolve_group_ids(session: AsyncSession, tenant_id: UUID, claim_groups: list[str]) -> list[UUID]:
@@ -131,10 +234,7 @@ async def _sync_memberships(session: AsyncSession, user_id: UUID, group_ids: lis
     await session.execute(delete(UserGroupMembership).where(UserGroupMembership.user_id == user_id))
     if not group_ids:
         return
-    session.add_all(
-        UserGroupMembership(user_id=user_id, group_id=group_id)
-        for group_id in group_ids
-    )
+    session.add_all(UserGroupMembership(user_id=user_id, group_id=group_id) for group_id in group_ids)
 
 
 async def build_request_context(

@@ -144,6 +144,33 @@ MUST NOT:
 - fare override di policy senza record audit
 - usare policy hardcoded
 
+### 7.10 LlmProviderService
+
+MUST:
+- censire provider supportati
+- risolvere credential tenant-level via `secret_ref`
+- abilitare modelli per task type (`chat`, `embedding`, `rerank`)
+- restituire configurazione runtime compatibile con LiteLLM
+- applicare solo provider/modelli abilitati per il tenant
+
+MUST NOT:
+- salvare API key in chiaro
+- chiamare provider direttamente bypassando LiteLLM
+- permettere modelli non abilitati dal tenant
+
+### 7.11 CostManagementService
+
+MUST:
+- registrare usage/costo per chat, embedding e agent run
+- verificare budget su scope `tenant`, `user`, `provider`, `space`
+- bloccare fail-closed quando un hard limit attivo viene superato
+- supportare soglie `soft` e `hard`
+
+MUST NOT:
+- perdere record di costo in caso di errore silenzioso
+- ignorare lo scope `space/progetto` quando disponibile
+- permettere fallback che bypassano i gate di budget
+
 ---
 
 ## 9. Identity, tenancy e accesso

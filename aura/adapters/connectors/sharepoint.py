@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from uuid import UUID, NAMESPACE_URL, uuid5
 
 from sqlalchemy import or_, select
 
-from aura.adapters.connectors.base import ConnectorAclError, ConnectorWrapper
+from aura.adapters.connectors.base import ConnectorAclError, ConnectorAuthError, ConnectorWrapper
 from aura.adapters.db.models import Datasource, Group
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.contracts import DocumentMetadata, LoadedDocument, NormalizedACL, ResolvedCredentials
 
+logger = logging.getLogger(__name__)
 
 RawSharePointDocument = dict[str, object]
 RawDocumentFetcher = Callable[[ResolvedCredentials, str | None], Awaitable[Iterable[RawSharePointDocument]]]
@@ -31,9 +33,12 @@ class SharePointConnector(ConnectorWrapper):
         credentials: ResolvedCredentials,
         cursor: str | None,
     ) -> AsyncIterator[LoadedDocument]:
-        tenant_id = UUID(str(credentials.extra.get("tenant_id"))) if credentials.extra.get("tenant_id") else await self._get_tenant_id(datasource_id)
-        raw_documents = await self._fetch_documents(credentials, cursor)
-        for raw in raw_documents:
+        tenant_id = (
+            UUID(str(credentials.extra.get("tenant_id")))
+            if credentials.extra and credentials.extra.get("tenant_id")
+            else await self._get_tenant_id(datasource_id)
+        )
+        async for raw in self._fetch_documents(credentials, cursor):
             acl = await self._normalize_acl_async(raw.get("acl"), tenant_id=tenant_id)
             if bool(raw.get("acl_required")) and acl is None:
                 raise ConnectorAclError("Source ACL required but not recoverable.")
@@ -126,13 +131,60 @@ class SharePointConnector(ConnectorWrapper):
         self,
         credentials: ResolvedCredentials,
         cursor: str | None,
-    ) -> Iterable[RawSharePointDocument]:
+    ) -> AsyncIterator[RawSharePointDocument]:
+        # Priority 1: injected fetcher (for tests and mock environments)
         if self._fetcher is not None:
-            return await self._fetcher(credentials, cursor)
-        documents = credentials.extra.get("documents")
-        if isinstance(documents, list):
-            return [dict(item) for item in documents if isinstance(item, dict)]
-        raise NotImplementedError("Live SharePoint Graph sync is not configured in this environment.")
+            docs = await self._fetcher(credentials, cursor)
+            for doc in docs:
+                yield doc
+            return
+
+        # Priority 2: static documents embedded in credentials.extra (dev/test)
+        extra = credentials.extra or {}
+        static_docs = extra.get("documents")
+        if isinstance(static_docs, list):
+            for item in static_docs:
+                if isinstance(item, dict):
+                    yield dict(item)
+            return
+
+        # Priority 3: Microsoft Graph API (production)
+        required_fields = ("client_id", "client_secret", "site_url")
+        missing = [k for k in required_fields if not extra.get(k)]
+        if missing:
+            raise ConnectorAuthError(
+                f"SharePoint credentials missing required fields: {missing}. "
+                "Configure the datasource with client_id, client_secret, site_url "
+                "(and optionally tenant_id, drive_id, folder_path) via SecretStore."
+            )
+
+        # tenant_id for Graph auth — use Azure AD tenant, not AURA tenant
+        graph_tenant_id = str(extra.get("tenant_id") or extra.get("azure_tenant_id", ""))
+        if not graph_tenant_id:
+            raise ConnectorAuthError(
+                "SharePoint credentials missing 'tenant_id' (Azure AD tenant ID). "
+                "This is the Azure AD directory ID, not the AURA tenant UUID."
+            )
+
+        from aura.adapters.connectors.graph_client import GraphApiClient
+        from aura.adapters.connectors.sharepoint_graph import SharePointGraphFetcher
+
+        graph_client = GraphApiClient(
+            tenant_id=graph_tenant_id,
+            client_id=str(extra["client_id"]),
+            client_secret=str(extra["client_secret"]),
+        )
+        try:
+            fetcher = SharePointGraphFetcher(graph_client=graph_client)
+            async for doc in fetcher.fetch(credentials, cursor):
+                yield doc
+        except ConnectorAuthError:
+            raise
+        except Exception as exc:
+            logger.exception("Unexpected error during SharePoint Graph fetch")
+            raise ConnectorAuthError(f"SharePoint Graph API error: {exc}") from exc
+        finally:
+            await graph_client.aclose()
 
     async def _get_tenant_id(self, datasource_id: UUID) -> UUID:
         async with AsyncSessionLocal() as session:

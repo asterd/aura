@@ -69,6 +69,8 @@ Ogni job MUST:
 - `aura.retrieval.latency_ms`
 - `aura.litellm.call_latency_ms`
 - `aura.litellm.tokens_used` per tenant
+- `aura.cost.estimated_usd`
+- `aura.cost.budget_block_total`
 - `aura.identity.sync_freshness_s` per tenant
 - `aura.datasource.stale_count`
 - `aura.pii.transform_error_total`
@@ -109,6 +111,21 @@ Ogni job MUST:
 - connector sync non parte (no credential resolution)
 - errore esplicito: `CredentialResolutionError`
 - nessun fallback a credenziali cacheate
+
+### 24.8 Budget hard limit exceeded
+- model call bloccata con errore esplicito
+- nessun tentativo verso LiteLLM
+- evento audit e metrica `aura.cost.budget_block_total`
+
+## 24B. Cost governance
+
+Regole obbligatorie:
+
+- il controllo budget avviene prima della model call
+- il recording usage avviene dopo la model call con migliore stima disponibile
+- per streaming, il costo può essere finalizzato a fine stream
+- se il costo reale non è disponibile, usare una stima deterministica documentata
+- i gate hard limit sono fail-closed
 
 ---
 

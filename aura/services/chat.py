@@ -20,6 +20,7 @@ from aura.domain.contracts import (
     ChatStreamEventToken,
     RequestContext,
     RetrievalRequest,
+    RetrievalResult,
 )
 from aura.services.conversation_service import ConversationService
 from aura.services.llm_service import LlmService, LiteLLMUnavailableError
@@ -50,6 +51,10 @@ class ChatService:
         self._conversations = conversation_service or ConversationService()
         self._policies = policy_service or PolicyService()
 
+    def _empty_retrieval_result(self, request: ChatRequest) -> RetrievalResult:
+        """Return an empty RetrievalResult for free-chat mode (no space_ids)."""
+        return RetrievalResult(query=request.message)
+
     async def respond(
         self,
         *,
@@ -57,16 +62,19 @@ class ChatService:
         request: ChatRequest,
         context: RequestContext,
     ) -> ChatResponse:
-        retrieval_result = await self._retrieval.retrieve(
-            session=session,
-            request=RetrievalRequest(
-                query=request.message,
-                space_ids=request.space_ids,
-                conversation_id=request.conversation_id,
-                retrieval_profile_id=request.retrieval_profile_id,
-            ),
-            context=context,
-        )
+        if request.space_ids:
+            retrieval_result = await self._retrieval.retrieve(
+                session=session,
+                request=RetrievalRequest(
+                    query=request.message,
+                    space_ids=request.space_ids,
+                    conversation_id=request.conversation_id,
+                    retrieval_profile_id=request.retrieval_profile_id,
+                ),
+                context=context,
+            )
+        else:
+            retrieval_result = self._empty_retrieval_result(request)
         return await self.respond_with_context(
             session=session,
             request=request,
@@ -81,16 +89,19 @@ class ChatService:
         request: ChatRequest,
         context: RequestContext,
     ) -> AsyncGenerator[ChatStreamEvent, None]:
-        retrieval_result = await self._retrieval.retrieve(
-            session=session,
-            request=RetrievalRequest(
-                query=request.message,
-                space_ids=request.space_ids,
-                conversation_id=request.conversation_id,
-                retrieval_profile_id=request.retrieval_profile_id,
-            ),
-            context=context,
-        )
+        if request.space_ids:
+            retrieval_result = await self._retrieval.retrieve(
+                session=session,
+                request=RetrievalRequest(
+                    query=request.message,
+                    space_ids=request.space_ids,
+                    conversation_id=request.conversation_id,
+                    retrieval_profile_id=request.retrieval_profile_id,
+                ),
+                context=context,
+            )
+        else:
+            retrieval_result = self._empty_retrieval_result(request)
         async for event in self.respond_stream_with_context(
             session=session,
             request=request,
@@ -144,10 +155,13 @@ class ChatService:
         )
         try:
             llm_result = await self._llm.generate(
+                session=session,
                 prompt=prompt,
                 transformed_user_text=input_transform.transformed_text,
                 model_override=model_name,
                 context=context,
+                space_ids=request.space_ids,
+                conversation_id=request.conversation_id,
             )
         except LiteLLMUnavailableError as exc:
             raise HTTPException(
@@ -235,10 +249,13 @@ class ChatService:
 
             try:
                 async for token in self._llm.stream_generate(
+                    session=session,
                     prompt=prompt,
                     transformed_user_text=input_transform.transformed_text,
                     model_override=model_name,
                     context=context,
+                    space_ids=request.space_ids,
+                    conversation_id=request.conversation_id,
                 ):
                     raw_chunks.append(token)
                     boundary_buffer += token

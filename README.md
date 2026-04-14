@@ -35,6 +35,7 @@ docs/
     phase_8_skills_sandbox.md      ← SandboxProvider, Docker, skill run + MCP Bridge
     phase_9_ops.md                 ← Langfuse, OTel, degraded modes, critical tests
     phase_10_ui.md                 ← Next.js shell, chat, spaces, agents UI
+    phase_10_llm_governance.md     ← Provider registry, tenant keys, model enablement, budget gates
 ```
 
 ---
@@ -352,6 +353,34 @@ CRITICO: nessun dato sensibile in localStorage/sessionStorage.
 CRITICO: il Composer NON invia durante STREAMING.
 CRITICO: artifact sempre via URL firmato S3 — mai base64 nel body.
 La fase è done quando chat streaming end-to-end funziona con citations, e @mention agente produce artifact renderizzato.
+```
+
+### Fase 10B — LLM Governance
+
+```
+Implementa la Fase 10B di AURA (LLM Provider Governance e Cost Management).
+
+Prerequisito: Fase 9 verde. La UI può essere parallela, ma la governance LLM deve restare lato backbone.
+
+Leggi questi file:
+1. CLAUDE.md
+2. docs/phases/phase_10_llm_governance.md
+3. docs/spec/01_contracts.md (nuovi contratti provider/budget)
+4. docs/spec/02_services.md (nuova sezione governance runtime LLM)
+5. docs/spec/05_api.md (nuovi endpoint admin LLM)
+6. docs/spec/06_ops.md (cost governance e metriche)
+7. docs/spec/07_db_schema.md (nuove tabelle provider/config/budget)
+
+Scope di questa fase:
+- Provider registry supportato dal backbone
+- Secret census per admin tenant via secret_ref
+- Tenant enablement di provider/modelli per task type
+- Runtime resolution di chat, embeddings e agenti via LiteLLM
+- Cost management con budget gate per tenant, user, provider e progetto/spazio
+
+CRITICO: nessuna API key persistita in chiaro.
+CRITICO: nessun fallback diretto ai provider fuori da LiteLLM.
+CRITICO: hard budget limit fail-closed.
 ```
 
 ---

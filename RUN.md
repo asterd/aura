@@ -53,6 +53,12 @@ Variabili importanti:
 
 - `DATABASE_URL`: runtime API/worker con ruolo `aura_app`
 - `ALEMBIC_DATABASE_URL`: migrazioni con ruolo `aura_service`
+- `LITELLM_BASE_URL`: endpoint del proxy LiteLLM
+- `LITELLM_MASTER_KEY`: chiave di accesso al proxy LiteLLM usata da API/worker
+- `LITELLM_PROXY_KEY_SYNC_ENABLED`: abilita sync best-effort delle tenant runtime key verso le API admin di LiteLLM
+- `LITELLM_PROXY_KEY_DURATION`: durata delle tenant runtime key create via LiteLLM (`permanent`, `30d`, ecc.)
+- `LOCAL_AUTH_JWT_SECRET`, `LOCAL_AUTH_JWT_ISSUER`, `LOCAL_AUTH_AUDIENCE`: JWT per tenant con auth locale
+- `AURA_BOOTSTRAP_TOKEN`: token richiesto per provisioning tenant
 - `OKTA_JWKS_URL`, `OKTA_ISSUER`, `OKTA_AUDIENCE`: autenticazione JWT
 - `LANGFUSE_BASE_URL`, `LANGFUSE_SECRET_KEY`: health/prompt fallback
 - `SANDBOX_PROVIDER`: default `docker`
@@ -206,8 +212,8 @@ Claim opzionali usati dal sistema:
 
 ### Per usare davvero i flussi autenticati hai 2 opzioni
 
-1. Configurare `OKTA_JWKS_URL` / `OKTA_ISSUER` / `OKTA_AUDIENCE` contro un IdP reale.
-2. Esporre un JWKS locale compatibile e firmare token coerenti con quei valori.
+1. Tenant `okta`: configurare `OKTA_JWKS_URL` / `OKTA_ISSUER` / `OKTA_AUDIENCE` globali oppure per-tenant via provisioning.
+2. Tenant `local`: usare provisioning interno + endpoint `/api/v1/auth/local/login`.
 
 Senza questa parte:
 
@@ -215,6 +221,127 @@ Senza questa parte:
 - `/health` funziona
 - gli endpoint autenticati rispondono `401`
 - il frontend arriva a `/login` ma non completa i flussi applicativi
+
+## 7.1 Provisioning tenant
+
+È disponibile un endpoint di bootstrap per creare tenant con auth `okta` o `local`:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/admin/tenants/provision \
+  -H "X-Bootstrap-Token: $AURA_BOOTSTRAP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "slug": "demo-local",
+    "display_name": "Demo Local Tenant",
+    "auth_mode": "local",
+    "admin_email": "admin@example.com",
+    "admin_password": "change-me-now",
+    "admin_display_name": "Local Admin"
+  }'
+```
+
+Per un tenant `okta`:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/admin/tenants/provision \
+  -H "X-Bootstrap-Token: $AURA_BOOTSTRAP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "slug": "corp-okta",
+    "display_name": "Corp Okta Tenant",
+    "auth_mode": "okta",
+    "okta_org_id": "corp",
+    "okta_jwks_url": "https://corp.okta.com/oauth2/default/v1/keys",
+    "okta_issuer": "https://corp.okta.com/oauth2/default",
+    "okta_audience": "api://default"
+  }'
+```
+
+## 7.2 Login locale
+
+Per i tenant con `auth_mode=local`:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/local/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenant_slug": "demo-local",
+    "email": "admin@example.com",
+    "password": "change-me-now"
+  }'
+```
+
+## 7.3 Gestione tenant corrente
+
+Una volta autenticato come tenant admin, puoi anche leggere o aggiornare la configurazione auth del tenant corrente:
+
+```bash
+curl http://localhost:8000/api/v1/admin/tenants/current \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```bash
+curl -X PATCH http://localhost:8000/api/v1/admin/tenants/current/auth \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "auth_mode": "okta",
+    "okta_jwks_url": "https://corp.okta.com/oauth2/default/v1/keys",
+    "okta_issuer": "https://corp.okta.com/oauth2/default",
+    "okta_audience": "api://default"
+  }'
+```
+
+Per riportare un tenant su auth locale, se non esistono già utenti locali attivi devi fornire anche le credenziali del bootstrap admin.
+
+## 7.4 Gestione utenti locali
+
+Per i tenant `local`, gli admin possono creare e aggiornare utenti interni:
+
+```bash
+curl http://localhost:8000/api/v1/admin/tenants/local-users \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```bash
+curl -X POST http://localhost:8000/api/v1/admin/tenants/local-users \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "analyst@example.com",
+    "password": "change-me",
+    "display_name": "Analyst",
+    "roles": ["user"]
+  }'
+```
+
+```bash
+curl -X PATCH http://localhost:8000/api/v1/admin/tenants/local-users/$USER_ID \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roles": ["user", "reviewer"],
+    "is_active": false
+  }'
+```
+
+## 8. Governance LLM e runtime key LiteLLM
+
+La governance resta centrata su AURA, ma il backend prova anche a sincronizzare una tenant runtime key sulle API admin di LiteLLM:
+
+- `GET /api/v1/admin/llm/runtime-key`
+- `POST /api/v1/admin/llm/runtime-key/sync`
+
+Questa chiave runtime:
+
+- è tenant-scoped
+- restringe i modelli ai soli modelli tenant-enabled
+- propaga, quando possibile, un hard limit tenant-level come `max_budget`
+- resta un layer complementare ai gate AURA, che continuano a fare enforcement su scope `tenant`, `user`, `provider`, `space`
+
+Se LiteLLM non espone o non raggiunge le API admin, AURA degrada in `master-key-fallback` senza rompere il runtime locale.
+
+L’endpoint restituisce un bearer token JWT firmato da AURA. La pagina `/login` del frontend supporta anche questo flusso oltre al paste manuale del JWT.
 
 ## 8. Dipendenze esterne che impattano i flussi
 
@@ -231,6 +358,82 @@ Quindi:
 - il proxy parte
 - l'health del proxy può risultare verde
 - chat/embeddings reali richiedono una configurazione valida del provider LLM
+- dalla fase attuale, l'abilitazione operativa dei modelli passa anche dal registry tenant-level esposto via API admin
+
+### 8.1.1 Bootstrap provider registry tenant-level
+
+Dopo il login con un utente che abbia ruolo `admin`, `tenant_admin` o `platform_admin`, il bootstrap consigliato è:
+
+1. Verificare i provider supportati:
+
+```bash
+curl -H "Authorization: Bearer <JWT>" http://localhost:8000/api/v1/admin/llm/providers
+```
+
+2. Registrare una credential tenant-level:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/admin/llm/credentials \
+  -H "Authorization: Bearer <JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider_key": "openai",
+    "name": "openai-prod",
+    "api_key": "<OPENAI_API_KEY>",
+    "is_default": true
+  }'
+```
+
+3. Abilitare almeno un modello chat e uno embedding:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/admin/llm/models \
+  -H "Authorization: Bearer <JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "credential_id": "<CREDENTIAL_ID>",
+    "task_type": "chat",
+    "model_name": "gpt-4o-mini",
+    "litellm_model_name": "openai/gpt-4o-mini",
+    "input_cost_per_1k": 0.00015,
+    "output_cost_per_1k": 0.00060,
+    "is_default": true
+  }'
+```
+
+```bash
+curl -X POST http://localhost:8000/api/v1/admin/llm/models \
+  -H "Authorization: Bearer <JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "credential_id": "<CREDENTIAL_ID>",
+    "task_type": "embedding",
+    "model_name": "text-embedding-3-small",
+    "litellm_model_name": "openai/text-embedding-3-small",
+    "input_cost_per_1k": 0.00002,
+    "is_default": true
+  }'
+```
+
+4. Se serve, configurare budget/gate:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/admin/llm/budgets \
+  -H "Authorization: Bearer <JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope_type": "tenant",
+    "scope_ref": "tenant",
+    "window": "monthly",
+    "hard_limit_usd": 200,
+    "action_on_hard_limit": "block"
+  }'
+```
+
+Senza questi step:
+
+- il proxy LiteLLM può essere raggiungibile
+- ma `chat`, `retrieval` e `agent start` possono essere rifiutati perché il tenant non ha ancora modelli abilitati
 
 Per usare retrieval/chat/ingestion reali serve aggiornare `infra/litellm/config.yaml` con credenziali vere del provider.
 

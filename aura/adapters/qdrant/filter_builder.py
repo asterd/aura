@@ -19,8 +19,14 @@ def build_retrieval_filter(
     ]
 
     if acl_mode == "source_acl_enforced":
+        # ACL stored by SharePoint connector uses lowercase email as the user identifier.
+        # UserIdentity.email is the canonical cross-system identifier (available from
+        # both Okta JWT claims and SharePoint Graph permissions).
+        # okta_sub is NOT used here because SharePoint does not know Okta internal IDs.
+        user_identifier = identity.email.lower()
+
         source_acl_should: list[models.Condition] = [
-            models.FieldCondition(key="acl_allow_users", match=models.MatchValue(value=identity.okta_sub)),
+            models.FieldCondition(key="acl_allow_users", match=models.MatchValue(value=user_identifier)),
         ]
         if identity.group_ids:
             source_acl_should.append(
@@ -39,7 +45,7 @@ def build_retrieval_filter(
             ),
         ]
         must_not: list[models.Condition] = [
-            models.FieldCondition(key="acl_deny_users", match=models.MatchValue(value=identity.okta_sub))
+            models.FieldCondition(key="acl_deny_users", match=models.MatchValue(value=user_identifier))
         ]
         if identity.group_ids:
             must_not.append(

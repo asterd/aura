@@ -20,13 +20,16 @@ from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context, identity_middleware
 from apps.api.dependencies.db import get_db_session
 from apps.api.routers.agents import router as agents_router
+from apps.api.routers.auth import router as auth_router
 from apps.api.routers.artifacts import router as artifacts_router
 from apps.api.routers.chat import router as chat_router
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.datasources import router as datasources_router
+from apps.api.routers.llm_admin import router as llm_admin_router
 from apps.api.routers.mcp import router as mcp_router
 from apps.api.routers.spaces import router as spaces_router
 from apps.api.routers.skills import router as skills_router
+from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.webhooks import router as webhooks_router
 from aura.adapters.sandbox.factory import get_default as get_default_sandbox_provider
 from aura.adapters.db.session import AsyncSessionLocal
@@ -59,13 +62,16 @@ class MeResponse(BaseModel):
 app = FastAPI(title="AURA API")
 app.middleware("http")(identity_middleware)
 app.include_router(chat_router)
+app.include_router(auth_router)
 app.include_router(agents_router)
 app.include_router(artifacts_router)
 app.include_router(conversations_router)
 app.include_router(spaces_router)
 app.include_router(datasources_router)
+app.include_router(llm_admin_router)
 app.include_router(webhooks_router)
 app.include_router(skills_router)
+app.include_router(tenants_router)
 app.include_router(mcp_router)
 
 init_otel("aura-api", settings.otlp_endpoint)

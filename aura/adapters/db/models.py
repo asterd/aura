@@ -33,7 +33,11 @@ class Tenant(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
-    okta_org_id: Mapped[str] = mapped_column(Text, nullable=False)
+    okta_org_id: Mapped[str | None] = mapped_column(Text)
+    auth_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'okta'"))
+    okta_jwks_url: Mapped[str | None] = mapped_column(Text)
+    okta_issuer: Mapped[str | None] = mapped_column(Text)
+    okta_audience: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -72,6 +76,21 @@ class UserGroupMembership(Base):
 
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     group_id: Mapped[UUID] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
+
+
+class LocalAuthUser(Base):
+    __tablename__ = "local_auth_users"
+    __table_args__ = (UniqueConstraint("tenant_id", "email", name="uq_local_auth_users_tenant_email"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(Text)
+    roles: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class EmbeddingProfile(Base):
@@ -354,6 +373,137 @@ class MessageCitation(Base):
     score: Mapped[float] = mapped_column(Float, nullable=False)
     snippet: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class LlmProvider(Base):
+    __tablename__ = "llm_providers"
+    __table_args__ = (
+        CheckConstraint("status IN ('active','disabled','deprecated')", name="ck_llm_providers_status"),
+        UniqueConstraint("provider_key", name="uq_llm_providers_provider_key"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    provider_key: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    supports_chat: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    supports_embeddings: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    supports_reasoning: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    supports_tools: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    base_url_hint: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class TenantProviderCredential(Base):
+    __tablename__ = "tenant_provider_credentials"
+    __table_args__ = (
+        CheckConstraint("status IN ('active','disabled')", name="ck_tenant_provider_credentials_status"),
+        UniqueConstraint("tenant_id", "provider_id", "name", name="uq_tenant_provider_credentials_name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    provider_id: Mapped[UUID] = mapped_column(ForeignKey("llm_providers.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    secret_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint_override: Mapped[str | None] = mapped_column(Text)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class TenantModelConfig(Base):
+    __tablename__ = "tenant_model_configs"
+    __table_args__ = (
+        CheckConstraint("task_type IN ('chat','embedding','rerank','agent')", name="ck_tenant_model_configs_task_type"),
+        CheckConstraint("status IN ('enabled','disabled')", name="ck_tenant_model_configs_status"),
+        UniqueConstraint(
+            "tenant_id",
+            "provider_id",
+            "credential_id",
+            "task_type",
+            "model_name",
+            name="uq_tenant_model_configs_binding",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    provider_id: Mapped[UUID] = mapped_column(ForeignKey("llm_providers.id"), nullable=False)
+    credential_id: Mapped[UUID] = mapped_column(ForeignKey("tenant_provider_credentials.id"), nullable=False)
+    alias: Mapped[str | None] = mapped_column(Text)
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    litellm_model_name: Mapped[str | None] = mapped_column(Text)
+    task_type: Mapped[str] = mapped_column(Text, nullable=False)
+    rate_limit_rpm: Mapped[int | None] = mapped_column(Integer)
+    concurrency_limit: Mapped[int | None] = mapped_column(Integer)
+    input_cost_per_1k: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    output_cost_per_1k: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'enabled'"))
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CostBudget(Base):
+    __tablename__ = "cost_budgets"
+    __table_args__ = (
+        CheckConstraint("scope_type IN ('tenant','user','provider','space')", name="ck_cost_budgets_scope_type"),
+        CheckConstraint("window IN ('daily','monthly')", name="ck_cost_budgets_window"),
+        CheckConstraint("action_on_hard_limit IN ('block','warn_only')", name="ck_cost_budgets_action"),
+        UniqueConstraint(
+            "tenant_id",
+            "scope_type",
+            "scope_ref",
+            "provider_id",
+            "model_name",
+            "budget_window",
+            name="uq_cost_budgets_scope",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    scope_type: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_id: Mapped[UUID | None] = mapped_column(ForeignKey("llm_providers.id"))
+    model_name: Mapped[str | None] = mapped_column(Text)
+    window: Mapped[str] = mapped_column("budget_window", Text, nullable=False)
+    soft_limit_usd: Mapped[float | None] = mapped_column(Numeric(10, 6))
+    hard_limit_usd: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
+    action_on_hard_limit: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'block'"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class LlmUsageRecord(Base):
+    __tablename__ = "llm_usage_records"
+    __table_args__ = (
+        CheckConstraint("task_type IN ('chat','embedding','rerank','agent')", name="ck_llm_usage_records_task_type"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"))
+    provider_id: Mapped[UUID] = mapped_column(ForeignKey("llm_providers.id"), nullable=False)
+    credential_id: Mapped[UUID | None] = mapped_column(ForeignKey("tenant_provider_credentials.id"))
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    task_type: Mapped[str] = mapped_column(Text, nullable=False)
+    space_id: Mapped[UUID | None] = mapped_column(ForeignKey("knowledge_spaces.id"))
+    conversation_id: Mapped[UUID | None] = mapped_column(ForeignKey("conversations.id"))
+    agent_run_id: Mapped[UUID | None] = mapped_column(ForeignKey("agent_runs.id"))
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    estimated_cost_usd: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False, server_default=text("0"))
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    trace_id: Mapped[str | None] = mapped_column(Text)
 
 
 class AgentPackage(Base):
