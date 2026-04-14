@@ -75,7 +75,7 @@ export type ChatStreamEvent =
   | { type: "done"; message_id: string; trace_id: string }
   | { type: "error"; code: string; message: string }
   | { type: "agent_running"; agent_name: string; run_id: string }
-  | { type: "agent_done"; agent_name: string; run_id: string; artifact?: ArtifactRef };
+  | { type: "agent_done"; agent_name: string; run_id: string; status: "succeeded" | "failed"; artifacts: string[] };
 
 export interface ChatRequest {
   conversation_id?: string;

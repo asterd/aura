@@ -83,6 +83,14 @@ class ConversationService:
             )
         )
 
+    async def delete_conversation(self, *, session: AsyncSession, context: RequestContext, conversation_id: UUID) -> bool:
+        conversation = await self.get_conversation(session=session, context=context, conversation_id=conversation_id)
+        if conversation is None:
+            return False
+        await session.delete(conversation)
+        await session.flush()
+        return True
+
     async def get_history(self, *, session: AsyncSession, context: RequestContext, conversation_id: UUID | None) -> list[dict]:
         if conversation_id is None:
             return []

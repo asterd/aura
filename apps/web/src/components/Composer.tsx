@@ -38,6 +38,22 @@ function generateId() {
   return crypto.randomUUID();
 }
 
+function artifactTypeFromRef(ref: string) {
+  const lowered = ref.toLowerCase();
+  if (lowered.endsWith(".md") || lowered.endsWith(".markdown")) return "markdown" as const;
+  if (lowered.endsWith(".json")) return "json" as const;
+  if (lowered.endsWith(".csv")) return "csv" as const;
+  if (lowered.endsWith(".pdf")) return "pdf_preview" as const;
+  if (/\.(png|jpg|jpeg|gif|webp)$/.test(lowered)) return "image" as const;
+  if (lowered.includes(".")) return "code" as const;
+  return "unknown" as const;
+}
+
+function artifactLabelFromRef(ref: string) {
+  const segments = ref.split("/");
+  return segments[segments.length - 1] || ref;
+}
+
 export function Composer({ threadId, onNewThread }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState("");
@@ -299,8 +315,13 @@ export function Composer({ threadId, onNewThread }: Props) {
             break;
           case "agent_done":
             clearAgentRunning(assistantMessageId);
-            if (event.artifact) {
-              addArtifact(assistantMessageId, event.artifact);
+            for (const ref of event.artifacts ?? []) {
+              addArtifact(assistantMessageId, {
+                artifact_id: ref,
+                artifact_type: artifactTypeFromRef(ref),
+                label: artifactLabelFromRef(ref),
+                created_at: new Date().toISOString(),
+              });
             }
             break;
           case "done":

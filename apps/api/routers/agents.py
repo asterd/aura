@@ -27,6 +27,14 @@ class AgentVersionResponse(BaseModel):
     entrypoint: str
 
 
+class AgentSummaryResponse(BaseModel):
+    agent_id: UUID
+    name: str
+    slug: str
+    description: str | None = None
+    status: str
+
+
 @router.post("/agents/{name}/run", response_model=AgentRunResult)
 async def run_agent(
     name: str,
@@ -42,6 +50,30 @@ async def run_agent(
         conversation_id=payload.get("conversation_id"),
     )
     return await agent_service.run_agent(session=session, request=request, context=context)
+
+
+@router.get("/agents", response_model=list[AgentSummaryResponse])
+async def list_published_agents(
+    context: RequestContext = Depends(get_request_context),
+    session: AsyncSession = Depends(get_db_session),
+    registry_service: RegistryService = Depends(get_registry_service),
+) -> list[AgentSummaryResponse]:
+    versions = await registry_service.list_versions(session, context.tenant_id)
+    latest_by_name: dict[str, AgentSummaryResponse] = {}
+    for version in versions:
+        if version.status != "published":
+            continue
+        latest_by_name.setdefault(
+            version.name,
+            AgentSummaryResponse(
+                agent_id=version.id,
+                name=version.name,
+                slug=version.name.lower().replace(" ", "-"),
+                description=version.manifest.get("description"),
+                status=version.status,
+            ),
+        )
+    return list(latest_by_name.values())
 
 
 @router.post("/admin/agents/upload", response_model=AgentVersionResponse)

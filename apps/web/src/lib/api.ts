@@ -10,6 +10,28 @@ import type {
 
 const BASE = "/api/v1";
 
+type ApiSpace = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+type ApiAgentSummary = {
+  agent_id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  status: string;
+};
+
+type ApiConversationSummary = {
+  id: string;
+  title?: string;
+  space_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
 function authHeaders(): HeadersInit {
   // Token is in httpOnly cookie — credentials: "include" sends it automatically
   // The middleware injects Authorization header for API rewrites
@@ -46,12 +68,17 @@ export async function getMe(): Promise<MeResponse> {
 
 // ─── Spaces ────────────────────────────────────────────────────────────────
 export async function getSpaces(): Promise<Space[]> {
-  return apiFetch<Space[]>("/spaces");
+  const spaces = await apiFetch<ApiSpace[]>("/spaces");
+  return spaces.map((space) => ({
+    space_id: space.id,
+    name: space.name,
+    description: space.slug,
+  }));
 }
 
 // ─── Agents ────────────────────────────────────────────────────────────────
 export async function getAgents(): Promise<AgentSummary[]> {
-  return apiFetch<AgentSummary[]>("/agents");
+  return apiFetch<ApiAgentSummary[]>("/agents");
 }
 
 // ─── Conversations ─────────────────────────────────────────────────────────
@@ -62,7 +89,17 @@ export interface ConversationsPage {
 
 export async function getConversations(cursor?: string): Promise<ConversationsPage> {
   const q = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-  return apiFetch<ConversationsPage>(`/conversations${q}`);
+  const items = await apiFetch<ApiConversationSummary[]>(`/conversations${q}`);
+  return {
+    items: items.map((item) => ({
+      conversation_id: item.id,
+      title: item.title,
+      last_message_at: item.updated_at,
+      message_count: 0,
+      active_space_ids: item.space_ids,
+    })),
+    next_cursor: null,
+  };
 }
 
 export async function getConversation(id: string): Promise<{ messages: Message[] }> {
@@ -70,7 +107,15 @@ export async function getConversation(id: string): Promise<{ messages: Message[]
 }
 
 export async function deleteConversation(id: string): Promise<void> {
-  await apiFetch<void>(`/conversations/${id}`, { method: "DELETE" });
+  const res = await fetch(`${BASE}/conversations/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text}`);
+  }
 }
 
 export async function getMessages(
@@ -124,7 +169,7 @@ export function uploadFile(
 
 // ─── Artifact signed URL ───────────────────────────────────────────────────
 export async function getArtifactSignedUrl(artifactId: string): Promise<{ url: string }> {
-  return apiFetch<{ url: string }>(`/artifacts/${artifactId}/signed-url`);
+  return apiFetch<{ url: string }>(`/artifacts/signed-url?ref=${encodeURIComponent(artifactId)}`);
 }
 
 // ─── SSE stream chat ───────────────────────────────────────────────────────

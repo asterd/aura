@@ -22,6 +22,10 @@ from aura.services.retrieval import RetrievalService
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 
+def _should_invoke_agent_flow(request: ChatRequest) -> bool:
+    return bool(request.invoked_agents or request.active_agent_ids or "@" in request.message)
+
+
 class RetrieveApiRequest(BaseModel):
     query: str
     space_ids: list[UUID]
@@ -67,7 +71,7 @@ async def respond(
     conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> ChatResponse:
     request = ChatRequest(**payload.model_dump())
-    if request.invoked_agents or "@" in request.message:
+    if _should_invoke_agent_flow(request):
         history = await conversation_service.get_history(
             session=session,
             context=context,
@@ -90,7 +94,7 @@ async def stream(
             async with session.begin():
                 await set_tenant_rls(session, context.tenant_id)
                 request = ChatRequest(**payload.model_dump())
-                if request.invoked_agents or "@" in request.message:
+                if _should_invoke_agent_flow(request):
                     history = await conversation_service.get_history(
                         session=session,
                         context=context,

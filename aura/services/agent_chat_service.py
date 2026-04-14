@@ -21,6 +21,7 @@ from aura.domain.contracts import (
 )
 from aura.services.agent_service import AgentService
 from aura.services.chat import ChatService
+from aura.services.registry_service import RegistryService
 from aura.services.retrieval import RetrievalService
 
 
@@ -40,13 +41,15 @@ class AgentChatService:
         agent_service: AgentService | None = None,
         chat_service: ChatService | None = None,
         retrieval_service: RetrievalService | None = None,
+        registry_service: RegistryService | None = None,
     ) -> None:
         self._agents = agent_service or AgentService()
         self._chat = chat_service or ChatService(retrieval_service=retrieval_service)
         self._retrieval = retrieval_service or RetrievalService()
+        self._registry = registry_service or RegistryService()
 
     async def respond(self, *, session, ctx, request: ChatRequest, history: list[dict]):
-        invocations = self._resolve_invocations(request)
+        invocations = await self._resolve_invocations(session=session, tenant_id=ctx.tenant_id, request=request)
         retrieval_task = asyncio.create_task(
             self._retrieval.retrieve(
                 session=session,
@@ -82,7 +85,7 @@ class AgentChatService:
         )
 
     async def respond_stream(self, *, session, ctx, request: ChatRequest, history: list[dict]) -> AsyncGenerator[ChatStreamEvent, None]:
-        invocations = self._resolve_invocations(request)
+        invocations = await self._resolve_invocations(session=session, tenant_id=ctx.tenant_id, request=request)
         run_ids = {self._invocation_key(resolved.invocation): uuid4() for resolved in invocations}
         for resolved in invocations:
             yield ChatStreamEventAgentRunning(
@@ -171,13 +174,22 @@ class AgentChatService:
             ),
         )
 
-    def _resolve_invocations(self, request: ChatRequest) -> list[_ResolvedInvocation]:
+    async def _resolve_invocations(self, *, session, tenant_id, request: ChatRequest) -> list[_ResolvedInvocation]:
         merged: dict[tuple[str, str | None], _ResolvedInvocation] = {}
         for name in self._parse_mentions(request.message):
             invocation = AgentInvocation(agent_name=name)
             merged[self._invocation_key(invocation)] = _ResolvedInvocation(invocation=invocation, invocation_mode="mention")
         for invocation in request.invoked_agents:
             merged[self._invocation_key(invocation)] = _ResolvedInvocation(invocation=invocation, invocation_mode="explicit")
+        if request.active_agent_ids:
+            versions = await self._registry.list_versions(session, tenant_id)
+            published_by_id = {version.id: version for version in versions if version.status == "published"}
+            for agent_id in request.active_agent_ids:
+                version = published_by_id.get(agent_id)
+                if version is None:
+                    continue
+                invocation = AgentInvocation(agent_name=version.name, agent_version=version.version)
+                merged[self._invocation_key(invocation)] = _ResolvedInvocation(invocation=invocation, invocation_mode="explicit")
         return list(merged.values())[:5]
 
     def _parse_mentions(self, message: str) -> list[str]:
