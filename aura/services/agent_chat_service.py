@@ -5,6 +5,7 @@ import logging
 import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 from uuid import uuid4
 
@@ -74,8 +75,9 @@ class AgentChatService:
         ]
         retrieval_result, *agent_results = await asyncio.gather(retrieval_task, *agent_tasks, return_exceptions=True)
         retrieval_result = self._normalize_retrieval_result(request, retrieval_result)
-        enhanced = self._build_enhanced_context(retrieval_result, agent_results, invocations)
-        successful_runs = self._collect_successful_runs(invocations, agent_results)
+        typed_agent_results = [cast(AgentRunResult | Exception, result) for result in agent_results]
+        enhanced = self._build_enhanced_context(retrieval_result, typed_agent_results, invocations)
+        successful_runs = self._collect_successful_runs(invocations, typed_agent_results)
         return await self._chat.respond_with_context(
             session=session,
             context=ctx,
@@ -117,7 +119,8 @@ class AgentChatService:
         ]
         retrieval_result, *agent_results = await asyncio.gather(retrieval_task, *agent_tasks, return_exceptions=True)
         retrieval_result = self._normalize_retrieval_result(request, retrieval_result)
-        for resolved, result in zip(invocations, agent_results, strict=True):
+        typed_agent_results = [cast(AgentRunResult | Exception, result) for result in agent_results]
+        for resolved, result in zip(invocations, typed_agent_results, strict=True):
             invocation = resolved.invocation
             if isinstance(result, AgentRunResult):
                 yield ChatStreamEventAgentDone(
@@ -135,8 +138,8 @@ class AgentChatService:
                     status="failed",
                     artifacts=[],
                 )
-        enhanced = self._build_enhanced_context(retrieval_result, agent_results, invocations)
-        successful_runs = self._collect_successful_runs(invocations, agent_results)
+        enhanced = self._build_enhanced_context(retrieval_result, typed_agent_results, invocations)
+        successful_runs = self._collect_successful_runs(invocations, typed_agent_results)
         async for event in self._chat.respond_stream_with_context(
             session=session,
             context=ctx,
@@ -239,4 +242,3 @@ class AgentChatService:
             if isinstance(result, AgentRunResult):
                 collected.append({"result": result, "invocation_mode": resolved.invocation_mode})
         return collected
-

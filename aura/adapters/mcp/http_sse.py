@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 from urllib.parse import urljoin
 
@@ -88,9 +89,9 @@ class _McpClientSession:
         self._sse_url = sse_url
         self._headers = headers
         self._timeout = timeout
-        self._stream_context = None
-        self._response = None
-        self._event_iter = None
+        self._stream_context: AbstractAsyncContextManager[httpx.Response] | None = None
+        self._response: httpx.Response | None = None
+        self._event_iter: Any = None
         self._message_url: str | None = None
         self._next_id = 0
 
@@ -176,6 +177,7 @@ class _McpClientSession:
 
     async def _read_message_url(self) -> str:
         assert self._event_iter is not None
+        assert self._response is not None
         async for event_name, data in self._event_iter:
             if event_name == "endpoint":
                 return urljoin(str(self._response.url), data)

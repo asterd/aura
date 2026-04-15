@@ -5,7 +5,6 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
 from aura.adapters.db.models import AgentRun
@@ -40,7 +39,7 @@ async def get_signed_url(
         select(AgentRun.id).where(
             AgentRun.tenant_id == context.tenant_id,
             AgentRun.user_id == context.identity.user_id,
-            AgentRun.artifact_refs.any(ref),
+            AgentRun.artifact_refs.contains([ref]),
         )
     )
     if owns_artifact is None:

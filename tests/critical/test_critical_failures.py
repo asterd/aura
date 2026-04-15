@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import time
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
@@ -10,6 +11,7 @@ import pytest
 from arq import Retry
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+from qdrant_client.http.exceptions import UnexpectedResponse
 from sqlalchemy import select
 
 from apps.api.config import settings
@@ -66,14 +68,25 @@ async def _get_user(tenant_id: UUID, okta_sub: str) -> User:
 
 def _count_indexed_chunks(*, space_id: UUID) -> int:
     client = QdrantClient(url=str(settings.qdrant_url))
-    results, _ = client.scroll(
-        "aura_chunks",
-        scroll_filter=models.Filter(
-            must=[models.FieldCondition(key="space_id", match=models.MatchValue(value=str(space_id)))]
-        ),
-        limit=100,
-    )
-    return len(results)
+    last_error: UnexpectedResponse | None = None
+    for _ in range(10):
+        try:
+            results, _ = client.scroll(
+                "aura_chunks",
+                scroll_filter=models.Filter(
+                    must=[models.FieldCondition(key="space_id", match=models.MatchValue(value=str(space_id)))]
+                ),
+                limit=100,
+            )
+            return len(results)
+        except UnexpectedResponse as exc:
+            if getattr(exc, "status_code", None) not in {404, 500}:
+                raise
+            last_error = exc
+            time.sleep(0.2)
+    if last_error is not None:
+        raise last_error
+    return 0
 
 
 async def test_1_tenant_isolation(setup_tenants) -> None:

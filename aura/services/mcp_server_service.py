@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from uuid import uuid4
 
@@ -151,26 +150,26 @@ class McpServerService:
             data = [{"name": version.name, "version": version.version} for version in published]
             return {"content": [{"type": "text", "text": json.dumps(data)}]}
         if tool_name == "aura_retrieve":
-            result = await self._retrieval.retrieve(
+            retrieval_result = await self._retrieval.retrieve(
                 session=session,
                 request=RetrievalRequest.model_validate(arguments),
                 context=context,
             )
-            return {"content": [{"type": "text", "text": result.model_dump_json()}]}
+            return {"content": [{"type": "text", "text": retrieval_result.model_dump_json()}]}
         if tool_name == "aura_chat":
-            result = await self._chat.respond(
+            chat_result = await self._chat.respond(
                 session=session,
                 request=ChatRequest.model_validate(arguments),
                 context=context,
             )
-            return {"content": [{"type": "text", "text": result.model_dump_json()}]}
+            return {"content": [{"type": "text", "text": chat_result.model_dump_json()}]}
         if tool_name == "aura_agent_run":
-            result = await self._agents.run_agent(
+            agent_result = await self._agents.run_agent(
                 session=session,
                 request=AgentRunRequest.model_validate(arguments),
                 context=context,
             )
-            return {"content": [{"type": "text", "text": result.model_dump_json()}]}
+            return {"content": [{"type": "text", "text": agent_result.model_dump_json()}]}
         return {
             "content": [{"type": "text", "text": json.dumps({"error": {"code": "tool_not_found", "message": tool_name}})}],
             "isError": True,

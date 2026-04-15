@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 import re
+from typing import cast
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aura.adapters.db.models import LlmProvider, TenantModelConfig, TenantProviderCredential
@@ -44,7 +45,7 @@ class LlmProviderService:
             .where(TenantProviderCredential.tenant_id == tenant_id)
             .order_by(LlmProvider.display_name, TenantProviderCredential.name)
         )
-        return list(rows.all())
+        return [cast(tuple[TenantProviderCredential, LlmProvider], row) for row in rows.all()]
 
     async def register_credential(
         self,
@@ -107,7 +108,7 @@ class LlmProviderService:
             .where(TenantModelConfig.tenant_id == tenant_id)
             .order_by(TenantModelConfig.task_type, LlmProvider.display_name, TenantModelConfig.model_name)
         )
-        return list(rows.all())
+        return [cast(tuple[TenantModelConfig, TenantProviderCredential, LlmProvider], row) for row in rows.all()]
 
     async def enable_model(
         self,
@@ -136,7 +137,7 @@ class LlmProviderService:
 
         if is_default:
             await session.execute(
-                TenantModelConfig.__table__.update()
+                update(TenantModelConfig)
                 .where(
                     TenantModelConfig.tenant_id == context.tenant_id,
                     TenantModelConfig.task_type == task_type.value,
@@ -164,8 +165,8 @@ class LlmProviderService:
                 task_type=task_type.value,
                 rate_limit_rpm=rate_limit_rpm,
                 concurrency_limit=concurrency_limit,
-                input_cost_per_1k=input_cost_per_1k,
-                output_cost_per_1k=output_cost_per_1k,
+                input_cost_per_1k=float(input_cost_per_1k) if input_cost_per_1k is not None else None,
+                output_cost_per_1k=float(output_cost_per_1k) if output_cost_per_1k is not None else None,
                 is_default=is_default,
                 status="enabled",
                 created_by=context.identity.user_id,
@@ -176,8 +177,8 @@ class LlmProviderService:
             config.litellm_model_name = litellm_model_name
             config.rate_limit_rpm = rate_limit_rpm
             config.concurrency_limit = concurrency_limit
-            config.input_cost_per_1k = input_cost_per_1k
-            config.output_cost_per_1k = output_cost_per_1k
+            config.input_cost_per_1k = float(input_cost_per_1k) if input_cost_per_1k is not None else None
+            config.output_cost_per_1k = float(output_cost_per_1k) if output_cost_per_1k is not None else None
             config.is_default = is_default
             config.status = "enabled"
         await session.flush()
@@ -204,7 +205,7 @@ class LlmProviderService:
             )
             .order_by(TenantModelConfig.is_default.desc(), TenantModelConfig.created_at.asc())
         )
-        candidates = list(rows.all())
+        candidates = [cast(tuple[TenantModelConfig, TenantProviderCredential, LlmProvider], row) for row in rows.all()]
         if not candidates:
             return await self._resolve_legacy_fallback(session, requested_model=requested_model, task_type=task_type)
 
@@ -252,7 +253,7 @@ class LlmProviderService:
 
     async def _unset_default_credentials(self, session: AsyncSession, tenant_id: UUID, provider_id: UUID) -> None:
         await session.execute(
-            TenantProviderCredential.__table__.update()
+            update(TenantProviderCredential)
             .where(
                 TenantProviderCredential.tenant_id == tenant_id,
                 TenantProviderCredential.provider_id == provider_id,
@@ -287,7 +288,9 @@ class LlmProviderService:
         if task_type == LlmTaskType.embedding:
             runtime_model_name = requested_model or "text-embedding-3-small"
         else:
-            runtime_model_name = "gpt-4o-mini" if requested_model in {None, "gpt-4o"} else requested_model
+            runtime_model_name = requested_model or "gpt-4o-mini"
+            if runtime_model_name == "gpt-4o":
+                runtime_model_name = "gpt-4o-mini"
         return ResolvedLlmRuntimeConfig(
             provider_id=provider.id,
             provider_key=provider.provider_key,

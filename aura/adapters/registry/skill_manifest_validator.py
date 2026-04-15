@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from aura.adapters.runtime.loader import RuntimeLoaderError
 from aura.utils.archive import UnsafeArchiveError, extract_zip_safely

@@ -67,15 +67,16 @@ class LiteLLMAdminService:
             return fallback
 
         secret_ref = self._secret_ref(context.tenant_id)
-        payload = {
+        metadata: dict[str, object] = {
+            "aura_managed": True,
+            "aura_key_name": key_name,
+            "tenant_id": str(context.tenant_id),
+            "tenant_user_id": str(context.identity.user_id),
+        }
+        payload: dict[str, object] = {
             "models": models,
             "duration": settings.litellm_proxy_key_duration,
-            "metadata": {
-                "aura_managed": True,
-                "aura_key_name": key_name,
-                "tenant_id": str(context.tenant_id),
-                "tenant_user_id": str(context.identity.user_id),
-            },
+            "metadata": metadata,
         }
         if max_budget is not None:
             payload["max_budget"] = float(max_budget)

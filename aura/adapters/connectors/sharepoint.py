@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import UTC, datetime
+from typing import Any, TypedDict, cast
 from uuid import UUID, NAMESPACE_URL, uuid5
 
 from sqlalchemy import or_, select
@@ -16,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 RawSharePointDocument = dict[str, object]
 RawDocumentFetcher = Callable[[ResolvedCredentials, str | None], Awaitable[Iterable[RawSharePointDocument]]]
+
+
+class _AclEntries(TypedDict):
+    allow_users: list[str]
+    allow_group_keys: list[str]
+    deny_users: list[str]
+    deny_group_keys: list[str]
+    inherited: bool
 
 
 class SharePointConnector(ConnectorWrapper):
@@ -42,6 +51,8 @@ class SharePointConnector(ConnectorWrapper):
             acl = await self._normalize_acl_async(raw.get("acl"), tenant_id=tenant_id)
             if bool(raw.get("acl_required")) and acl is None:
                 raise ConnectorAclError("Source ACL required but not recoverable.")
+            raw_tags = raw.get("tags", [])
+            tags = [str(tag) for tag in raw_tags] if isinstance(raw_tags, list) else []
             metadata = DocumentMetadata(
                 title=str(raw.get("title") or raw.get("name") or raw.get("external_id") or "Untitled"),
                 source_path=str(raw.get("source_path") or raw.get("path") or raw.get("external_id") or ""),
@@ -49,7 +60,7 @@ class SharePointConnector(ConnectorWrapper):
                 content_type=str(raw.get("content_type") or "text/plain"),
                 language=str(raw["language"]) if raw.get("language") else None,
                 classification=str(raw["classification"]) if raw.get("classification") else None,
-                tags=[str(tag) for tag in raw.get("tags", [])],
+                tags=tags,
                 modified_at=_coerce_datetime(raw.get("modified_at")),
             )
             yield LoadedDocument(
@@ -201,10 +212,12 @@ def _coerce_datetime(value: object) -> datetime | None:
     return datetime.fromisoformat(str(value))
 
 
-def _parse_acl_entries(raw_acl: object) -> dict[str, object]:
-    payload = raw_acl if isinstance(raw_acl, dict) else {}
-    allow = [str(item) for item in payload.get("allow", [])]
-    deny = [str(item) for item in payload.get("deny", [])]
+def _parse_acl_entries(raw_acl: object) -> _AclEntries:
+    payload = cast(dict[str, Any], raw_acl) if isinstance(raw_acl, dict) else {}
+    raw_allow = payload.get("allow", [])
+    raw_deny = payload.get("deny", [])
+    allow = [str(item) for item in raw_allow] if isinstance(raw_allow, list) else []
+    deny = [str(item) for item in raw_deny] if isinstance(raw_deny, list) else []
     public_markers = {"group:everyone", "group:organization"}
 
     def _group_keys(values: list[str]) -> list[str]:
@@ -230,5 +243,5 @@ def _parse_acl_entries(raw_acl: object) -> dict[str, object]:
         "allow_group_keys": _group_keys(allow),
         "deny_users": _user_keys(deny),
         "deny_group_keys": _group_keys(deny),
-        "inherited": payload.get("inherited", True),
+        "inherited": bool(payload.get("inherited", True)),
     }

@@ -21,6 +21,7 @@ from aura.adapters.embeddings.litellm import LiteLLMEmbeddingClient
 from aura.adapters.qdrant.setup import QdrantChunkStore
 from aura.adapters.s3.client import S3Client
 from aura.domain.contracts import JobPayload, LoadedDocument, NormalizedACL
+from qdrant_client.http.models import PointStruct
 
 
 @dataclass(slots=True)
@@ -100,7 +101,7 @@ class IngestionService:
                 await self._qdrant.ensure_collection(embedding_profile.dimensions)
 
                 updated_at = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-                points = []
+                points: list[PointStruct] = []
                 for chunk, vector in zip(chunks, vectors, strict=True):
                     payload_dict = self._build_qdrant_payload(
                         document=document,
@@ -114,19 +115,11 @@ class IngestionService:
                     )
                     self._qdrant.validate_payload(payload_dict)
                     point_id = str(uuid5(NAMESPACE_URL, f"{version.id}:{chunk.chunk_index}:{chunk.char_start}:{chunk.char_end}"))
-                    points.append(
-                        {
-                            "id": point_id,
-                            "vector": vector,
-                            "payload": payload_dict,
-                        }
-                    )
-
-                from qdrant_client.http.models import PointStruct
+                    points.append(PointStruct(id=point_id, vector=vector, payload=payload_dict))
 
                 await self._qdrant.replace_document_chunks(
                     document.id,
-                    [PointStruct(id=point["id"], vector=point["vector"], payload=point["payload"]) for point in points],
+                    points,
                 )
 
                 version.chunk_count = len(chunks)

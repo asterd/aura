@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from apps.api.config import settings
 from aura.adapters.connectors import get_connector
-from aura.adapters.connectors.base import ConnectorAclError, ConnectorAuthError
+from aura.adapters.connectors.base import ConnectorAclError
 from aura.adapters.db.models import Datasource, Document, KnowledgeSpace
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.adapters.qdrant.setup import QdrantChunkStore

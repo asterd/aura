@@ -9,6 +9,18 @@ from typing import Any
 
 from aura.adapters.db.session import engine
 
+metrics: Any = None
+trace: Any = None
+OTLPMetricExporter: Any = None
+OTLPSpanExporter: Any = None
+FastAPIInstrumentor: Any = None
+SQLAlchemyInstrumentor: Any = None
+MeterProvider: Any = None
+PeriodicExportingMetricReader: Any = None
+Resource: Any = None
+TracerProvider: Any = None
+BatchSpanProcessor: Any = None
+
 try:
     from opentelemetry import metrics, trace
     from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter

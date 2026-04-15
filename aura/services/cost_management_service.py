@@ -57,16 +57,16 @@ class CostManagementService:
                 provider_id=provider_id,
                 model_name=model_name,
                 window=window.value,
-                soft_limit_usd=soft_limit_usd,
-                hard_limit_usd=hard_limit_usd,
+                soft_limit_usd=float(soft_limit_usd) if soft_limit_usd is not None else None,
+                hard_limit_usd=float(hard_limit_usd),
                 action_on_hard_limit=action_on_hard_limit.value,
                 is_active=True,
                 created_by=context.identity.user_id,
             )
             session.add(budget)
         else:
-            budget.soft_limit_usd = soft_limit_usd
-            budget.hard_limit_usd = hard_limit_usd
+            budget.soft_limit_usd = float(soft_limit_usd) if soft_limit_usd is not None else None
+            budget.hard_limit_usd = float(hard_limit_usd)
             budget.action_on_hard_limit = action_on_hard_limit.value
             budget.is_active = True
         await session.flush()
@@ -123,7 +123,7 @@ class CostManagementService:
             agent_run_id=usage.agent_run_id,
             input_tokens=max(0, int(input_tokens)),
             output_tokens=max(0, int(output_tokens)),
-            estimated_cost_usd=estimated_cost_usd,
+            estimated_cost_usd=float(estimated_cost_usd),
             measured_at=context.now_utc,
             trace_id=context.trace_id,
         )

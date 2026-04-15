@@ -4,11 +4,14 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
 from uuid import UUID
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+if TYPE_CHECKING:
+    from aura.adapters.mcp.protocol import McpBridgeAdapter
 
 
 class UserIdentity(BaseModel):

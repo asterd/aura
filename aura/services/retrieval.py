@@ -11,6 +11,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http import models
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -187,16 +188,16 @@ class RetrievalService:
             )
         )[0]
 
-        dense_results = await asyncio.to_thread(
-            self._qdrant.search,
-            collection_name="aura_chunks",
+        dense_results = await self._qdrant_search_with_retries(
             query_vector=query_vector,
-            query_filter=filter_obj,
+            filter_obj=filter_obj,
             limit=retrieval_profile.top_k,
-            with_payload=True,
-            with_vectors=False,
         )
-        lexical_results = await asyncio.to_thread(self._lexical_search, filter_obj, query, retrieval_profile.top_k)
+        lexical_results = await self._lexical_search_with_retries(
+            filter_obj=filter_obj,
+            query=query,
+            limit=retrieval_profile.top_k,
+        )
 
         combined: dict[str, tuple[dict[str, object], float]] = {}
         rrf_scores: defaultdict[str, float] = defaultdict(float)
@@ -216,6 +217,57 @@ class RetrievalService:
         ]
         candidates.sort(key=lambda item: item.score, reverse=True)
         return candidates
+
+    def _is_retryable_qdrant_error(self, exc: UnexpectedResponse) -> bool:
+        return getattr(exc, "status_code", None) in {404, 500}
+
+    async def _qdrant_search_with_retries(
+        self,
+        *,
+        query_vector: list[float],
+        filter_obj: models.Filter,
+        limit: int,
+    ):
+        last_error: UnexpectedResponse | None = None
+        for _ in range(10):
+            try:
+                return await asyncio.to_thread(
+                    self._qdrant.search,
+                    collection_name="aura_chunks",
+                    query_vector=query_vector,
+                    query_filter=filter_obj,
+                    limit=limit,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+            except UnexpectedResponse as exc:
+                if not self._is_retryable_qdrant_error(exc):
+                    raise
+                last_error = exc
+                await asyncio.sleep(0.2)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Qdrant search failed without an error")
+
+    async def _lexical_search_with_retries(
+        self,
+        *,
+        filter_obj: models.Filter,
+        query: str,
+        limit: int,
+    ) -> list[_Candidate]:
+        last_error: UnexpectedResponse | None = None
+        for _ in range(10):
+            try:
+                return await asyncio.to_thread(self._lexical_search, filter_obj, query, limit)
+            except UnexpectedResponse as exc:
+                if not self._is_retryable_qdrant_error(exc):
+                    raise
+                last_error = exc
+                await asyncio.sleep(0.2)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Qdrant scroll failed without an error")
 
     def _lexical_search(self, filter_obj: models.Filter, query: str, limit: int) -> list[_Candidate]:
         points, _ = self._qdrant.scroll(

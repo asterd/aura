@@ -67,6 +67,7 @@ async def test_update_profile_updates_display_name(app_client):
 async def test_local_user_can_change_password(app_client):
     tenant_id = UUID("aaaaaaaa-0000-0000-0000-0000000000aa")
     tenant_slug = f"local-password-{uuid4().hex[:8]}"
+    admin_email = f"local-admin-{uuid4().hex[:8]}@example.com"
     owner_url = TEST_DATABASE_URL.replace("://aura_app:aura_app@", "://aura_service:aura_service@", 1)
     owner_engine = create_async_engine(owner_url)
     now = datetime.now(UTC)
@@ -98,7 +99,7 @@ async def test_local_user_can_change_password(app_client):
                 ),
                 {
                     "tenant_id": tenant_id,
-                    "email": "local-admin@example.com",
+                    "email": admin_email,
                     "password_hash": hash_password("old-password"),
                     "display_name": "Local Admin",
                     "now": now,
@@ -109,7 +110,7 @@ async def test_local_user_can_change_password(app_client):
             "/api/v1/auth/local/login",
             json={
                 "tenant_slug": tenant_slug,
-                "email": "local-admin@example.com",
+                "email": admin_email,
                 "password": "old-password",
             },
         )
@@ -127,7 +128,7 @@ async def test_local_user_can_change_password(app_client):
             "/api/v1/auth/local/login",
             json={
                 "tenant_slug": tenant_slug,
-                "email": "local-admin@example.com",
+                "email": admin_email,
                 "password": "old-password",
             },
         )
@@ -137,7 +138,7 @@ async def test_local_user_can_change_password(app_client):
             "/api/v1/auth/local/login",
             json={
                 "tenant_slug": tenant_slug,
-                "email": "local-admin@example.com",
+                "email": admin_email,
                 "password": "new-password-123",
             },
         )

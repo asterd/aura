@@ -106,7 +106,12 @@ async def publish_agent(app_client, token: str, version_id: UUID):
 
 
 async def test_non_published_agent_not_executable(app_client):
-    token = generate_test_jwt(tenant_id=TENANT_A, okta_sub="okta|agent-draft", email="agent-draft@example.com")
+    token = generate_test_jwt(
+        tenant_id=TENANT_A,
+        okta_sub="okta|agent-draft",
+        email="agent-draft@example.com",
+        roles=["admin", "tenant_admin"],
+    )
     uploaded = await upload_agent(app_client, token, name="draft-agent", status="draft")
 
     response = await app_client.post(
@@ -119,7 +124,12 @@ async def test_non_published_agent_not_executable(app_client):
 
 
 async def test_cron_trigger_fires_on_schedule(app_client):
-    token = generate_test_jwt(tenant_id=TENANT_A, okta_sub="okta|agent-cron", email="agent-cron@example.com")
+    token = generate_test_jwt(
+        tenant_id=TENANT_A,
+        okta_sub="okta|agent-cron",
+        email="agent-cron@example.com",
+        roles=["admin", "tenant_admin"],
+    )
     uploaded = await upload_agent(
         app_client,
         token,
@@ -156,7 +166,12 @@ async def test_cron_trigger_fires_on_schedule(app_client):
 
 
 async def test_agent_mention_invokes_agent(app_client):
-    token = generate_test_jwt(tenant_id=TENANT_A, okta_sub="okta|agent-mention", email="agent-mention@example.com")
+    token = generate_test_jwt(
+        tenant_id=TENANT_A,
+        okta_sub="okta|agent-mention",
+        email="agent-mention@example.com",
+        roles=["admin", "tenant_admin"],
+    )
     uploaded = await upload_agent(app_client, token, name="mention-agent", status="validated")
     await publish_agent(app_client, token, UUID(uploaded["id"]))
     space_id = await create_space(app_client, token, name="Agent Mention Space", slug="agent-mention-space")

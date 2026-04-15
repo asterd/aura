@@ -12,6 +12,11 @@ from aura.domain.contracts import DetectedEntity, PiiMode, PiiPolicy, PiiTransfo
 from aura.services.policy_service import PolicyService
 from aura.utils.observability import record_pii_transform_error
 
+AnalyzerEngine: Any = None
+Pattern: Any = None
+PatternRecognizer: Any = None
+RecognizerRegistry: Any = None
+
 try:
     from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerRegistry
 except ImportError:  # pragma: no cover - exercised only when optional deps are missing

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import httpx
 
 from apps.api.config import settings
+
+Langfuse: Any = None
 
 try:
     from langfuse import Langfuse

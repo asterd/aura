@@ -66,4 +66,4 @@ class Settings(BaseSettings):
         return jwks_url
 
 
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -198,7 +199,7 @@ class AgentService:
                 ),
                 input_tokens=max(1, len(str(request.input).split())),
                 output_tokens=max(0, len(str(transformed_output).split())),
-                estimated_cost_usd=0,
+                estimated_cost_usd=Decimal("0"),
             )
             await self._audit.emit_agent_run(context=context, run_id=persisted.id)
             output_text = transformed_output if isinstance(transformed_output, str) else transformed_output.get("result")
@@ -241,7 +242,7 @@ class AgentService:
                 ),
                 input_tokens=max(1, len(str(request.input).split())),
                 output_tokens=0,
-                estimated_cost_usd=0,
+                estimated_cost_usd=Decimal("0"),
             )
             await self._audit.emit_agent_run(context=context, run_id=persisted.id)
             logger.exception("agent_run_failed agent=%s version=%s trace_id=%s", version.name, version.version, context.trace_id)

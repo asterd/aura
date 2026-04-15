@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 from jwt import InvalidTokenError
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import cast
 
 from apps.api.config import settings
 from aura.adapters.db.session import set_tenant_rls
@@ -46,7 +47,9 @@ class JwksCache:
         self._expires_at = datetime.min.replace(tzinfo=UTC)
         self._keys_by_url: dict[str, tuple[datetime, list[dict[str, object]]]] = {}
 
-    async def get_keys(self, jwks_url: str) -> list[dict[str, object]]:
+    async def get_keys(self, jwks_url: str | None = None) -> list[dict[str, object]]:
+        if jwks_url is None:
+            raise TypeError("jwks_url is required")
         now = datetime.now(UTC)
         cached = self._keys_by_url.get(jwks_url)
         if cached is not None and now < cached[0]:
@@ -76,7 +79,7 @@ class JwksCache:
             matching_key = keys[0]
         if matching_key is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown token signing key.")
-        return jwt.algorithms.get_default_algorithms()[header["alg"]].from_jwk(json.dumps(matching_key))
+        return jwt.algorithms.get_default_algorithms()[str(header["alg"])].from_jwk(json.dumps(matching_key))
 
 
 jwks_cache = JwksCache()
@@ -160,7 +163,7 @@ async def _validate_okta_token(token: str, auth_config: TenantAuthConfig) -> Val
         signing_key = await jwks_cache.get_signing_key(token, auth_config.jwks_url or str(settings.okta_jwks_url))
         claims = jwt.decode(
             token,
-            key=signing_key,
+            key=cast(str | bytes, signing_key),
             algorithms=["HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
             issuer=auth_config.issuer,
             audience=auth_config.audience,

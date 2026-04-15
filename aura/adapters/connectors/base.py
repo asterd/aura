@@ -29,7 +29,7 @@ class ConnectorWrapper(Protocol):
     supports_incremental_sync: bool
     supports_remote_delete_detection: bool
 
-    async def load_documents(
+    def load_documents(
         self,
         datasource_id: UUID,
         credentials: ResolvedCredentials,

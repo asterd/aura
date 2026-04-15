@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aura.adapters.langfuse.client import LangfuseClient, LangfuseUnavailableError
 from aura.adapters.db.models import KnowledgeSpace, ToneProfile
-from aura.domain.contracts import ChatRequest, RetrievalResult
+from aura.domain.contracts import ChatRequest, RequestContext, RetrievalResult
 from aura.utils.observability import get_current_trace_id
 
 

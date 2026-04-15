@@ -15,6 +15,7 @@ from redis.asyncio import from_url as redis_from_url
 from sqlalchemy import select
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from typing import cast
 
 from apps.api.config import settings
 from apps.api.dependencies.auth import get_request_context, identity_middleware
@@ -189,8 +190,8 @@ async def health() -> HealthResponse:
         "sandbox": _sandbox_provider.health_check(),
     }
     raw_results = {name: await check for name, check in component_checks.items()}
-    results = {
-        name: value if isinstance(value, str) else ("ok" if value else "down")
+    results: dict[str, Literal["ok", "degraded", "down"]] = {
+        name: cast(Literal["ok", "degraded", "down"], value if isinstance(value, str) else ("ok" if value else "down"))
         for name, value in raw_results.items()
     }
     status: Literal["ok", "degraded"] = "ok" if all(value == "ok" for value in results.values()) else "degraded"
