@@ -4,7 +4,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from fastapi import HTTPException, status

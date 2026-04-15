@@ -225,7 +225,7 @@ class AgentService:
             )
         except RuntimeLoaderError:
             raise
-        except Exception as exc:
+        except Exception:
             logger.exception("agent_run_failed agent=%s version=%s trace_id=%s", version.name, version.version, context.trace_id)
             persisted = await self._create_run(
                 session=session,
