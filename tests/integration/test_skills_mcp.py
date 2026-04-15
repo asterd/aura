@@ -113,7 +113,12 @@ async def insert_sandbox_policy(*, tenant_id: UUID, name: str, max_wall_time_s: 
 
 
 async def test_sandbox_network_blocked(app_client):
-    token = generate_test_jwt(tenant_id=TENANT_A, okta_sub="okta|skill-network", email="skill-network@example.com")
+    token = generate_test_jwt(
+        tenant_id=TENANT_A,
+        okta_sub="okta|skill-network",
+        email="skill-network@example.com",
+        roles=["admin", "tenant_admin"],
+    )
     await upload_skill(
         app_client,
         token,
@@ -143,7 +148,12 @@ except Exception as exc:
 
 
 async def test_sandbox_timeout_respected(app_client):
-    token = generate_test_jwt(tenant_id=TENANT_A, okta_sub="okta|skill-timeout", email="skill-timeout@example.com")
+    token = generate_test_jwt(
+        tenant_id=TENANT_A,
+        okta_sub="okta|skill-timeout",
+        email="skill-timeout@example.com",
+        roles=["admin", "tenant_admin"],
+    )
     await insert_sandbox_policy(tenant_id=TENANT_A, name="short-timeout", max_wall_time_s=3)
     await upload_skill(
         app_client,
