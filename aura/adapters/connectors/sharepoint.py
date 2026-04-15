@@ -34,8 +34,8 @@ class SharePointConnector(ConnectorWrapper):
         cursor: str | None,
     ) -> AsyncIterator[LoadedDocument]:
         tenant_id = (
-            UUID(str(credentials.extra.get("tenant_id")))
-            if credentials.extra and credentials.extra.get("tenant_id")
+            UUID(str(credentials.extra.get("aura_tenant_id")))
+            if credentials.extra and credentials.extra.get("aura_tenant_id")
             else await self._get_tenant_id(datasource_id)
         )
         async for raw in self._fetch_documents(credentials, cursor):
@@ -158,12 +158,13 @@ class SharePointConnector(ConnectorWrapper):
                 "(and optionally tenant_id, drive_id, folder_path) via SecretStore."
             )
 
-        # tenant_id for Graph auth — use Azure AD tenant, not AURA tenant
-        graph_tenant_id = str(extra.get("tenant_id") or extra.get("azure_tenant_id", ""))
+        # Use the Azure AD tenant for Graph auth. The AURA tenant id is passed
+        # separately as aura_tenant_id for ACL normalization/RLS purposes.
+        graph_tenant_id = str(extra.get("azure_tenant_id") or extra.get("tenant_id", ""))
         if not graph_tenant_id:
             raise ConnectorAuthError(
-                "SharePoint credentials missing 'tenant_id' (Azure AD tenant ID). "
-                "This is the Azure AD directory ID, not the AURA tenant UUID."
+                "SharePoint credentials missing Azure AD tenant id. "
+                "Provide 'azure_tenant_id' (preferred) or 'tenant_id' in the datasource secret."
             )
 
         from aura.adapters.connectors.graph_client import GraphApiClient
@@ -204,11 +205,12 @@ def _parse_acl_entries(raw_acl: object) -> dict[str, object]:
     payload = raw_acl if isinstance(raw_acl, dict) else {}
     allow = [str(item) for item in payload.get("allow", [])]
     deny = [str(item) for item in payload.get("deny", [])]
+    public_markers = {"group:everyone", "group:organization"}
 
     def _group_keys(values: list[str]) -> list[str]:
         keys: list[str] = []
         for value in values:
-            if value.startswith("group:"):
+            if value.startswith("group:") and value not in public_markers:
                 keys.append(value.removeprefix("group:"))
         return keys
 
@@ -217,6 +219,8 @@ def _parse_acl_entries(raw_acl: object) -> dict[str, object]:
         for value in values:
             if value.startswith("user:"):
                 keys.append(value.removeprefix("user:"))
+            elif value in public_markers:
+                keys.append("*")
             elif not value.startswith("group:"):
                 keys.append(value)
         return keys

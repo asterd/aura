@@ -47,13 +47,14 @@ jobs:
       REDIS_URL: redis://localhost:6379
       QDRANT_URL: http://localhost:6333
       S3_ENDPOINT_URL: http://localhost:9000
-      S3_ACCESS_KEY: minioadmin
-      S3_SECRET_KEY: minioadmin
-      S3_BUCKET: aura-test
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_BUCKET_NAME: aura-test
+      S3_REGION: us-east-1
       LITELLM_BASE_URL: http://localhost:4000
-      JWT_SECRET: ci-test-secret-not-production
-      BOOTSTRAP_TOKEN: ci-bootstrap-token
-      LANGFUSE_HOST: ""
+      AURA_BOOTSTRAP_TOKEN: ci-bootstrap-token
+      OKTA_JWKS_URL: https://example.com/oauth2/default/v1/keys
+      LANGFUSE_BASE_URL: http://localhost:3001
       LANGFUSE_PUBLIC_KEY: ""
       LANGFUSE_SECRET_KEY: ""
 

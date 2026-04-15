@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +41,12 @@ def _to_version_response(version) -> AgentVersionResponse:
         agent_type=version.agent_type,
         entrypoint=version.entrypoint,
     )
+
+
+def _require_admin(context: RequestContext) -> None:
+    if set(context.identity.roles).intersection({"admin", "tenant_admin", "platform_admin"}):
+        return
+    raise HTTPException(status_code=403, detail="Tenant admin role required.")
 
 
 @router.post("/agents/{name}/run", response_model=AgentRunResult)
@@ -89,6 +95,7 @@ async def upload_agent(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> AgentVersionResponse:
+    _require_admin(context)
     version = await registry_service.upload_and_validate(
         session=session,
         zip_bytes=await artifact.read(),
@@ -105,6 +112,7 @@ async def publish_agent(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> AgentVersionResponse:
+    _require_admin(context)
     version = await registry_service.publish(session, agent_version_id)
     for trigger in version.manifest.get("triggers") or []:
         if trigger.get("type") == "cron":
@@ -137,6 +145,7 @@ async def list_agents(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[AgentVersionResponse]:
+    _require_admin(context)
     versions = await registry_service.list_versions(session, context.tenant_id)
     return [
         AgentVersionResponse(

@@ -36,12 +36,19 @@ class CreateApiKeyResponse(ApiKeyResponse):
     raw_key: str
 
 
+def _require_admin(identity: UserIdentity) -> None:
+    if set(identity.roles).intersection({"admin", "tenant_admin", "platform_admin"}):
+        return
+    raise HTTPException(status_code=403, detail="Tenant admin role required.")
+
+
 @router.post("", response_model=CreateApiKeyResponse, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     payload: CreateApiKeyRequest,
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
 ) -> CreateApiKeyResponse:
+    _require_admin(identity)
     record, raw_key = await service.create(
         session,
         tenant_id=identity.tenant_id,
@@ -67,6 +74,7 @@ async def list_api_keys(
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[ApiKeyResponse]:
+    _require_admin(identity)
     keys = await service.list_keys(session, identity.tenant_id)
     return [
         ApiKeyResponse(
@@ -88,6 +96,7 @@ async def revoke_api_key(
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
+    _require_admin(identity)
     ok = await service.revoke(session, key_id, identity.tenant_id)
     if not ok:
         raise HTTPException(status_code=404, detail="API key not found or already revoked")

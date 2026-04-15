@@ -32,9 +32,9 @@ async function createSpace(data: {
     body: JSON.stringify({
       name: data.name,
       slug,
-      space_type: "rag",
+      space_type: "team",
       visibility: "private",
-      source_access_mode: "tenant_members",
+      source_access_mode: "space_acl_only",
     }),
   });
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);

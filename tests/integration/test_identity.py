@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-from uuid import uuid4
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from apps.api.config import settings
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.models import LocalAuthUser, Tenant, User
+from aura.utils.passwords import hash_password
 from tests.conftest import (
     TENANT_A,
     TENANT_B,
+    TEST_DATABASE_URL,
     USER_A_SUB,
     USER_B_SUB,
     generate_test_jwt,
@@ -45,6 +49,101 @@ async def test_expired_jwt_returns_401(app_client):
 async def test_missing_auth_returns_401(app_client):
     r = await app_client.get("/api/v1/me")
     assert r.status_code == 401
+
+
+async def test_update_profile_updates_display_name(app_client):
+    token = generate_test_jwt(tenant_id=TENANT_A, okta_sub="okta|profile-user", email="profile@example.com")
+
+    response = await app_client.patch(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"display_name": "Updated Profile Name"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["display_name"] == "Updated Profile Name"
+
+
+async def test_local_user_can_change_password(app_client):
+    tenant_id = UUID("aaaaaaaa-0000-0000-0000-0000000000aa")
+    tenant_slug = f"local-password-{uuid4().hex[:8]}"
+    owner_url = TEST_DATABASE_URL.replace("://aura_app:aura_app@", "://aura_service:aura_service@", 1)
+    owner_engine = create_async_engine(owner_url)
+    now = datetime.now(UTC)
+    try:
+        async with owner_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO tenants (id, slug, display_name, auth_mode, okta_org_id, status, created_at, updated_at)
+                    VALUES (:id, :slug, :display_name, 'local', :okta_org_id, 'active', :now, :now)
+                    ON CONFLICT (id) DO UPDATE
+                    SET slug = :slug, display_name = :display_name, auth_mode = 'local', updated_at = :now
+                    """
+                ),
+                {
+                    "id": tenant_id,
+                    "slug": tenant_slug,
+                    "display_name": "Local Password Tenant",
+                    "okta_org_id": str(tenant_id),
+                    "now": now,
+                },
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO local_auth_users (tenant_id, email, password_hash, display_name, roles, is_active, created_at, updated_at)
+                    VALUES (:tenant_id, :email, :password_hash, :display_name, '{"admin","tenant_admin"}', TRUE, :now, :now)
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "email": "local-admin@example.com",
+                    "password_hash": hash_password("old-password"),
+                    "display_name": "Local Admin",
+                    "now": now,
+                },
+            )
+
+        login = await app_client.post(
+            "/api/v1/auth/local/login",
+            json={
+                "tenant_slug": tenant_slug,
+                "email": "local-admin@example.com",
+                "password": "old-password",
+            },
+        )
+        assert login.status_code == 200, login.text
+        token = login.json()["access_token"]
+
+        change = await app_client.post(
+            "/api/v1/auth/me/change-password",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"current_password": "old-password", "new_password": "new-password-123"},
+        )
+        assert change.status_code == 204, change.text
+
+        old_login = await app_client.post(
+            "/api/v1/auth/local/login",
+            json={
+                "tenant_slug": tenant_slug,
+                "email": "local-admin@example.com",
+                "password": "old-password",
+            },
+        )
+        assert old_login.status_code == 401, old_login.text
+
+        new_login = await app_client.post(
+            "/api/v1/auth/local/login",
+            json={
+                "tenant_slug": tenant_slug,
+                "email": "local-admin@example.com",
+                "password": "new-password-123",
+            },
+        )
+        assert new_login.status_code == 200, new_login.text
+    finally:
+        await owner_engine.dispose()
 
 
 async def test_provision_local_tenant_and_login(app_client):
@@ -169,6 +268,22 @@ async def test_local_tenant_admin_can_manage_users_and_auth_mode(app_client):
     )
     assert switch_okta.status_code == 200, switch_okta.text
     assert switch_okta.json()["auth_mode"] == "okta"
+
+
+async def test_non_admin_cannot_access_admin_api_keys(app_client):
+    token = generate_test_jwt(tenant_id=TENANT_A, okta_sub="okta|plain-user", email="plain-user@example.com")
+
+    response = await app_client.get("/api/v1/admin/api-keys", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 403, response.text
+
+
+async def test_non_admin_cannot_access_admin_agents(app_client):
+    token = generate_test_jwt(tenant_id=TENANT_A, okta_sub="okta|plain-agent-user", email="plain-agent-user@example.com")
+
+    response = await app_client.get("/api/v1/admin/agents", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 403, response.text
 
 
 async def test_cross_tenant_isolation(setup_tenants):

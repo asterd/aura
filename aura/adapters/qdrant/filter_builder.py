@@ -26,7 +26,7 @@ def build_retrieval_filter(
         user_identifier = identity.email.lower()
 
         source_acl_should: list[models.Condition] = [
-            models.FieldCondition(key="acl_allow_users", match=models.MatchValue(value=user_identifier)),
+            models.FieldCondition(key="acl_allow_users", match=models.MatchAny(any=[user_identifier, "*"])),
         ]
         if identity.group_ids:
             source_acl_should.append(

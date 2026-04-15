@@ -66,7 +66,7 @@ class ConnectorSyncService:
 
         connector = get_connector(datasource.connector_type)
         credentials = await resolve_credentials_from_ref(secret_ref, self._secret_store)
-        credentials.extra.setdefault("tenant_id", str(payload.tenant_id))
+        credentials.extra.setdefault("aura_tenant_id", str(payload.tenant_id))
 
         cursor = datasource.sync_cursor
         partial_failures = 0

@@ -10,6 +10,7 @@ from uuid import UUID, NAMESPACE_URL, uuid5
 
 from redis.exceptions import LockNotOwnedError
 from redis.asyncio import from_url as redis_from_url
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -204,13 +205,22 @@ class IngestionService:
             if loaded.raw_text:
                 return self._canonicalize_text(loaded.raw_text), loaded.acl
             if loaded.raw_bytes_ref:
-                raw_bytes = await self._s3.download_file(settings.s3_bucket_name, loaded.raw_bytes_ref)
+                raw_bytes = await self._download_connector_bytes(loaded.raw_bytes_ref)
                 text = await self._parse_binary_document(source_path, content_type, raw_bytes)
                 return text, loaded.acl
             raise ValueError("Connector document is missing both raw_text and raw_bytes_ref.")
 
         text = await self._parse_binary_document(source_path, content_type, data)
         return text, None
+
+    async def _download_connector_bytes(self, ref: str) -> bytes:
+        if ref.startswith(("http://", "https://")):
+            timeout = httpx.Timeout(max(settings.service_check_timeout_s * 6, 30.0))
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                response = await client.get(ref)
+                response.raise_for_status()
+                return response.content
+        return await self._s3.download_file(settings.s3_bucket_name, ref)
 
     async def _parse_binary_document(self, source_path: str, content_type: str, data: bytes) -> str:
         suffix = Path(source_path).suffix.lower()

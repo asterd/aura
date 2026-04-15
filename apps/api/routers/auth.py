@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, Field, SecretStr
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import require_identity
 from apps.api.dependencies.db import get_db_session, get_unscoped_db_session
-from aura.adapters.db.models import User
+from aura.adapters.db.models import LocalAuthUser, User
 from aura.domain.contracts import UserIdentity
 from aura.services.identity import issue_local_access_token
 from aura.utils.passwords import hash_password, verify_password
@@ -91,20 +91,26 @@ async def change_password(
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """Cambio password per utenti local-auth. Noop per Okta."""
-    user = await session.get(User, identity.user_id)
-    if user is None or not hasattr(user, "password_hash") or user.password_hash is None:
+    local_user = await session.scalar(
+        select(LocalAuthUser).where(
+            LocalAuthUser.tenant_id == identity.tenant_id,
+            LocalAuthUser.email == identity.email.lower(),
+            LocalAuthUser.is_active.is_(True),
+        )
+    )
+    if local_user is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password change not available for this auth mode",
         )
-    if not verify_password(payload.current_password, user.password_hash):
+    if not verify_password(payload.current_password, local_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect",
         )
     await session.execute(
-        update(User)
-        .where(User.id == identity.user_id)
+        update(LocalAuthUser)
+        .where(LocalAuthUser.id == local_user.id)
         .values(password_hash=hash_password(payload.new_password))
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

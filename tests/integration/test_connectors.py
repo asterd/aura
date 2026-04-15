@@ -273,6 +273,36 @@ async def test_connector_auth_failure_marks_datasource(app_client) -> None:
     assert datasource.last_sync_status == "auth_error"
 
 
+async def test_ingestion_supports_remote_raw_bytes_ref() -> None:
+    service = IngestionService()
+
+    class _Response:
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeHttpClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def get(self, url: str) -> _Response:
+            assert url == "https://download.example.com/policy.txt"
+            return _Response(b"Remote connector content")
+
+    with patch("aura.services.ingestion_service.httpx.AsyncClient", _FakeHttpClient):
+        content = await service._download_connector_bytes("https://download.example.com/policy.txt")  # noqa: SLF001
+
+    assert content == b"Remote connector content"
+
+
 async def test_identity_sync_result() -> None:
     service = IdentitySyncService(
         provider=StaticDirectoryProvider(
