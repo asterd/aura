@@ -43,7 +43,8 @@ jobs:
         command: server /data
 
     env:
-      DATABASE_URL: postgresql+asyncpg://aura:aura@localhost:5432/aura_test
+      DATABASE_URL: postgresql+asyncpg://aura_app:aura_app@localhost:5432/aura_test
+      ALEMBIC_DATABASE_URL: postgresql+asyncpg://aura_service:aura_service@localhost:5432/aura_test
       REDIS_URL: redis://localhost:6379
       QDRANT_URL: http://localhost:6333
       S3_ENDPOINT_URL: http://localhost:9000
@@ -68,6 +69,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -e ".[dev]"
+
+      - name: Initialize database roles
+        run: psql postgresql://aura:aura@localhost:5432/aura_test -f infra/init/01_roles.sql
 
       - name: Run DB migrations
         run: alembic upgrade head
