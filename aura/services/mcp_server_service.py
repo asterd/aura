@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from redis.asyncio import Redis
 from redis.asyncio import from_url as redis_from_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +40,6 @@ class McpServerService:
         self._agents = agent_service
         self._spaces = space_service
         self._registry = registry_service
-        self._redis = redis_from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
 
     async def open_session(self, context: RequestContext) -> str:
         session_id = uuid4().hex
@@ -47,21 +48,33 @@ class McpServerService:
             "user_id": str(context.identity.user_id),
             "okta_sub": context.identity.okta_sub,
         }
-        await self._redis.setex(self._session_key(session_id), 300, json.dumps(payload))
+        redis = self._redis()
+        try:
+            await redis.setex(self._session_key(session_id), 300, json.dumps(payload))
+        finally:
+            await redis.aclose()
         return session_id
 
-    async def stream(self, session_id: str):
-        yield self._sse_event("endpoint", f"/mcp/v1/sse/messages/{session_id}")
-        while await self._redis.exists(self._session_key(session_id)):
-            item = await self._redis.blpop(self._queue_key(session_id), timeout=1)
-            if item is None:
-                yield ": keep-alive\n\n"
-                continue
-            _, payload = item
-            yield self._sse_event("message", payload)
+    async def stream(self, session_id: str) -> AsyncGenerator[str, None]:
+        redis = self._redis()
+        try:
+            yield self._sse_event("endpoint", f"/mcp/v1/sse/messages/{session_id}")
+            while await redis.exists(self._session_key(session_id)):
+                item = await redis.blpop(self._queue_key(session_id), timeout=1)
+                if item is None:
+                    yield ": keep-alive\n\n"
+                    continue
+                _, payload = item
+                yield self._sse_event("message", payload)
+        finally:
+            await redis.aclose()
 
     async def close_session(self, session_id: str) -> None:
-        await self._redis.delete(self._session_key(session_id), self._queue_key(session_id))
+        redis = self._redis()
+        try:
+            await redis.delete(self._session_key(session_id), self._queue_key(session_id))
+        finally:
+            await redis.aclose()
 
     async def handle_message(
         self,
@@ -71,7 +84,11 @@ class McpServerService:
         context: RequestContext,
         payload: dict,
     ) -> dict | None:
-        session_payload = await self._redis.get(self._session_key(session_id))
+        redis = self._redis()
+        try:
+            session_payload = await redis.get(self._session_key(session_id))
+        finally:
+            await redis.aclose()
         if session_payload is None:
             raise ValueError("MCP session not found.")
         self._ensure_session_owner(session_payload=session_payload, context=context)
@@ -91,8 +108,12 @@ class McpServerService:
                 "error": {"code": "internal_error", "message": str(exc)},
             }
         if request_id is not None:
-            await self._redis.rpush(self._queue_key(session_id), json.dumps(response))
-            await self._redis.expire(self._queue_key(session_id), 300)
+            redis = self._redis()
+            try:
+                await redis.rpush(self._queue_key(session_id), json.dumps(response))
+                await redis.expire(self._queue_key(session_id), 300)
+            finally:
+                await redis.aclose()
         return response if request_id is not None else None
 
     async def _dispatch(self, *, session: AsyncSession, context: RequestContext, payload: dict) -> dict:
@@ -193,6 +214,9 @@ class McpServerService:
 
     def _sse_event(self, event: str, data: str) -> str:
         return f"event: {event}\ndata: {data}\n\n"
+
+    def _redis(self) -> Redis:
+        return redis_from_url(settings.redis_url, encoding="utf-8", decode_responses=True)
 
     def _ensure_session_owner(self, *, session_payload: str, context: RequestContext) -> None:
         owner = json.loads(session_payload)
