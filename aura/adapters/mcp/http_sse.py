@@ -21,6 +21,14 @@ class HttpSseMcpBridgeAdapter:
     ) -> None:
         self._server_url = server_url
         self._client = client or httpx.AsyncClient(timeout=settings.mcp_client_timeout_s + 5)
+        self._owns_client = client is None
+
+    async def __aenter__(self) -> "HttpSseMcpBridgeAdapter":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        del exc_type, exc, tb
+        await self.aclose()
 
     async def list_tools(self) -> list[McpToolDefinition]:
         async with self._session() as session:
@@ -74,6 +82,10 @@ class HttpSseMcpBridgeAdapter:
         del initialize_result
         await session.notify("notifications/initialized", {})
         return await session.request(method, params)
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
 
 
 class _McpClientSession:

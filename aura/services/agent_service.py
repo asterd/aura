@@ -256,6 +256,7 @@ class AgentService:
                 error_message=f"{type(exc).__name__}: {exc}",
             )
         finally:
+            await self._close_mcp_adapters(mcp_adapters)
             await self._loader.cleanup_temp_dir(temp_dir)
 
     async def _create_run(
@@ -299,3 +300,9 @@ class AgentService:
         unauthorized = [name for name in list(tool_map.keys()) if name not in allowed_tools]
         for name in unauthorized:
             tool_map.pop(name, None)
+
+    async def _close_mcp_adapters(self, adapters: dict[str, Any]) -> None:
+        for adapter in adapters.values():
+            close = getattr(adapter, "aclose", None)
+            if callable(close):
+                await close()

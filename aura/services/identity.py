@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 from uuid import UUID
 
 import httpx
@@ -44,25 +46,48 @@ class TenantAuthConfig:
 class JwksCache:
     def __init__(self, ttl: timedelta = timedelta(hours=1)) -> None:
         self._ttl = ttl
-        self._expires_at = datetime.min.replace(tzinfo=UTC)
         self._keys_by_url: dict[str, tuple[datetime, list[dict[str, object]]]] = {}
+        self._inflight_fetches: dict[tuple[str, int], asyncio.Task[list[dict[str, object]]]] = {}
+        self._lock = Lock()
 
     async def get_keys(self, jwks_url: str | None = None) -> list[dict[str, object]]:
         if jwks_url is None:
             raise TypeError("jwks_url is required")
         now = datetime.now(UTC)
-        cached = self._keys_by_url.get(jwks_url)
-        if cached is not None and now < cached[0]:
-            return cached[1]
+        with self._lock:
+            cached = self._keys_by_url.get(jwks_url)
+            if cached is not None and now < cached[0]:
+                return cached[1]
 
+            loop = asyncio.get_running_loop()
+            inflight_key = (jwks_url, id(loop))
+            task = self._inflight_fetches.get(inflight_key)
+            created_task = task is None
+            if task is None:
+                task = loop.create_task(self._fetch_keys(jwks_url))
+                self._inflight_fetches[inflight_key] = task
+
+        try:
+            keys = await task
+        except Exception:
+            if created_task:
+                with self._lock:
+                    self._inflight_fetches.pop(inflight_key, None)
+            raise
+
+        with self._lock:
+            self._keys_by_url[jwks_url] = (datetime.now(UTC) + self._ttl, keys)
+            if created_task:
+                self._inflight_fetches.pop(inflight_key, None)
+        return keys
+
+    async def _fetch_keys(self, jwks_url: str) -> list[dict[str, object]]:
         timeout = httpx.Timeout(settings.service_check_timeout_s)
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(jwks_url)
             response.raise_for_status()
         payload = response.json()
-        keys = list(payload.get("keys", []))
-        self._keys_by_url[jwks_url] = (now + self._ttl, keys)
-        return keys
+        return list(payload.get("keys", []))
 
     async def get_signing_key(self, token: str, jwks_url: str) -> object:
         header = jwt.get_unverified_header(token)

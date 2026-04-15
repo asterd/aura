@@ -88,6 +88,11 @@ class _FilteredMcpBridgeAdapter:
             )
         return await self._delegate.call_tool(tool_name, arguments, credentials, timeout)
 
+    async def aclose(self) -> None:
+        close = getattr(self._delegate, "aclose", None)
+        if callable(close):
+            await close()
+
 
 class SkillService:
     def __init__(
@@ -314,15 +319,18 @@ class SkillService:
             allowed_tools=set(version.exposed_tools),
         )
         started_at = time.monotonic()
-        result: McpToolResult = await adapter.call_tool(tool_name, arguments, credentials, version.timeout_s)
-        return SandboxResult(
-            status="failed" if result.is_error else "succeeded",
-            output=result.model_dump() if not result.is_error else None,
-            artifacts=[],
-            error_message=result.error_message,
-            exit_code=None,
-            wall_time_s=time.monotonic() - started_at,
-        )
+        try:
+            result: McpToolResult = await adapter.call_tool(tool_name, arguments, credentials, version.timeout_s)
+            return SandboxResult(
+                status="failed" if result.is_error else "succeeded",
+                output=result.model_dump() if not result.is_error else None,
+                artifacts=[],
+                error_message=result.error_message,
+                exit_code=None,
+                wall_time_s=time.monotonic() - started_at,
+            )
+        finally:
+            await adapter.aclose()
 
     async def _resolve_policy_id(self, session: AsyncSession, tenant_id: UUID, policy_name: str | None) -> UUID | None:
         if not policy_name:
