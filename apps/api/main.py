@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from redis.asyncio import from_url as redis_from_url
 from sqlalchemy import select
 from sqlalchemy import text
+from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from typing import cast
 
@@ -80,7 +81,11 @@ app.include_router(mcp_router)
 init_otel("aura-api", settings.otlp_endpoint)
 instrument_sqlalchemy()
 instrument_fastapi(app)
-health_engine = create_async_engine(settings.migration_database_url, pool_pre_ping=True)
+health_engine = create_async_engine(
+    settings.migration_database_url,
+    pool_pre_ping=True,
+    poolclass=pool.NullPool,
+)
 
 
 @app.middleware("http")

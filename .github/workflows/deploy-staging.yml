@@ -30,12 +30,13 @@ jobs:
       #     FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
       - name: Run smoke test
+        if: ${{ vars.STAGING_URL != '' }}
         env:
           STAGING_URL: ${{ vars.STAGING_URL }}
         run: |
           sleep 10
-          if [ -z "$STAGING_URL" ]; then
-            echo "STAGING_URL GitHub environment variable is not set"
-            exit 1
-          fi
           curl -f "${STAGING_URL%/}/api/v1/health"
+
+      - name: Skip smoke test
+        if: ${{ vars.STAGING_URL == '' }}
+        run: echo "Skipping smoke test because STAGING_URL is not configured for the staging environment."

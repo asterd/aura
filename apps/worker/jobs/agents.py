@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from apps.api.config import settings
@@ -19,6 +20,7 @@ from aura.utils.observability import record_job_failure, record_job_success, rec
 owner_engine = create_async_engine(
     settings.migration_database_url,
     pool_pre_ping=True,
+    poolclass=pool.NullPool,
     connect_args={"timeout": settings.postgres_connect_timeout_s},
 )
 OwnerSessionLocal = async_sessionmaker(owner_engine, expire_on_commit=False)

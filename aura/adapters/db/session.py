@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import event
+from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from apps.api.config import settings
@@ -14,6 +15,7 @@ _UNSET_TENANT_ID = "00000000-0000-0000-0000-000000000000"
 engine = create_async_engine(
     settings.database_url,
     pool_pre_ping=True,
+    poolclass=pool.NullPool,
     connect_args={"timeout": settings.postgres_connect_timeout_s},
 )
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
