@@ -6,6 +6,7 @@ from aura.adapters.sandbox.docker import DockerSandboxProvider
 from aura.adapters.sandbox.k8s import K8sJobSandboxProvider
 from aura.services.agent_chat_service import AgentChatService
 from aura.services.agent_service import AgentService
+from aura.services.api_key_service import ApiKeyService
 from aura.services.chat import ChatService
 from aura.services.conversation_service import ConversationService
 from aura.services.cost_management_service import CostManagementService
@@ -32,6 +33,7 @@ def _make_sandbox_provider():
 
 
 sandbox_provider = _make_sandbox_provider()
+api_key_service = ApiKeyService()
 retrieval_service = RetrievalService()
 policy_service = PolicyService()
 space_service = SpaceService()

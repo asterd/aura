@@ -156,7 +156,7 @@ class PiiService:
                 return [self._detect_with_presidio(text, policy) for text in texts]
             except Exception:
                 record_pii_transform_error(mode=policy.mode.value, tenant_id=self._policy_tenant_id(policy))
-                logger.warning("presidio_detection_failed_falling_back_to_regex")
+                logger.warning("presidio_detection_failed_falling_back_to_regex", exc_info=True)
         return [self._detect_with_regex(text, policy) for text in texts]
 
     def _policy_tenant_id(self, policy: PiiPolicy) -> str:

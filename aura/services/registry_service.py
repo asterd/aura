@@ -4,6 +4,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -11,9 +12,20 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
-from aura.adapters.db.models import AgentPackage, AgentVersion, PiiPolicy, ModelPolicy, SandboxPolicy
+from aura.adapters.db.models import AgentPackage, AgentTriggerRegistration, AgentVersion, PiiPolicy, ModelPolicy, SandboxPolicy
 from aura.adapters.registry.manifest_validator import ManifestValidator
 from aura.adapters.s3.client import S3Client
+from aura.domain.contracts import CronTrigger
+
+if TYPE_CHECKING:
+    class _TriggerScheduler(Protocol):
+        async def register_cron(
+            self,
+            session: AsyncSession,
+            agent_version_id: UUID,
+            trigger: CronTrigger,
+            tenant_id: UUID,
+        ) -> None: ...
 
 
 @dataclass(slots=True)
@@ -112,7 +124,14 @@ class RegistryService:
         await session.flush()
         return version
 
-    async def publish(self, session: AsyncSession, agent_version_id: UUID) -> AgentVersion:
+    async def publish(
+        self,
+        session: AsyncSession,
+        agent_version_id: UUID,
+        *,
+        tenant_id: UUID | None = None,
+        trigger_scheduler: "_TriggerScheduler | None" = None,
+    ) -> AgentVersion:
         version = await session.scalar(select(AgentVersion).where(AgentVersion.id == agent_version_id))
         if version is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent version not found.")
@@ -121,7 +140,38 @@ class RegistryService:
         version.status = "published"
         version.published_at = datetime.now(UTC)
         await session.flush()
+        effective_tenant_id = tenant_id or version.tenant_id
+        await self._register_triggers(session, version, effective_tenant_id, trigger_scheduler)
         return version
+
+    async def _register_triggers(
+        self,
+        session: AsyncSession,
+        version: AgentVersion,
+        tenant_id: UUID,
+        trigger_scheduler: "_TriggerScheduler | None",
+    ) -> None:
+        for trigger in list(version.manifest.get("triggers") or []):
+            trigger_type = trigger.get("type")
+            if trigger_type == "cron" and trigger_scheduler is not None:
+                from aura.domain.contracts import CronTrigger as _CronTrigger  # noqa: PLC0415
+                await trigger_scheduler.register_cron(
+                    session=session,
+                    agent_version_id=version.id,
+                    trigger=_CronTrigger.model_validate(trigger),
+                    tenant_id=tenant_id,
+                )
+            elif trigger_type == "event":
+                session.add(
+                    AgentTriggerRegistration(
+                        tenant_id=tenant_id,
+                        agent_version_id=version.id,
+                        trigger_type="event",
+                        trigger_config=trigger,
+                        status="active",
+                    )
+                )
+        await session.flush()
 
     async def resolve_agent_version(
         self,

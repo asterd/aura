@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import inspect
+import os
 import shutil
 import tempfile
 import zipfile
@@ -23,6 +24,7 @@ class RuntimeLoader:
 
     async def load_build_fn(self, artifact_ref: str, entrypoint: str, artifact_sha256: str) -> Callable:
         temp_dir = Path(tempfile.mkdtemp(prefix="aura-agent-runtime-"))
+        os.chmod(temp_dir, 0o700)
         try:
             bucket, key = self._parse_s3_ref(artifact_ref)
             raw_zip = await self._s3.download_file(bucket, key)

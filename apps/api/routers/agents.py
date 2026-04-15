@@ -113,30 +113,12 @@ async def publish_agent(
     session: AsyncSession = Depends(get_db_session),
 ) -> AgentVersionResponse:
     _require_admin(context)
-    version = await registry_service.publish(session, agent_version_id)
-    for trigger in version.manifest.get("triggers") or []:
-        if trigger.get("type") == "cron":
-            from aura.domain.contracts import CronTrigger
-
-            await trigger_scheduler_service.register_cron(
-                session=session,
-                agent_version_id=version.id,
-                trigger=CronTrigger.model_validate(trigger),
-                tenant_id=context.tenant_id,
-            )
-        elif trigger.get("type") == "event":
-            from aura.adapters.db.models import AgentTriggerRegistration
-
-            session.add(
-                AgentTriggerRegistration(
-                    tenant_id=context.tenant_id,
-                    agent_version_id=version.id,
-                    trigger_type="event",
-                    trigger_config=trigger,
-                    status="active",
-                )
-            )
-    await session.flush()
+    version = await registry_service.publish(
+        session,
+        agent_version_id,
+        tenant_id=context.tenant_id,
+        trigger_scheduler=trigger_scheduler_service,
+    )
     return _to_version_response(version)
 
 

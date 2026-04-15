@@ -150,15 +150,27 @@ async def resolve_tenant_auth_config(session: AsyncSession, tenant_id: UUID) -> 
 
 
 async def validate_token(session: AsyncSession, token: str) -> ValidatedClaims:
+    # tenant_id is extracted without signature verification only to look up the
+    # per-tenant auth configuration (JWKS URL, issuer, audience). The tenant_id
+    # value is re-confirmed against the fully-verified claims below to prevent
+    # an attacker from routing a valid foreign-tenant token into the wrong RLS context.
     try:
-        unverified_claims = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+        unverified_claims: dict[str, object] = jwt.decode(
+            token,
+            options={"verify_signature": False, "verify_exp": False},
+            algorithms=["HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+        )
     except InvalidTokenError as exc:
         raise _unauthorized() from exc
-    tenant_id = _extract_tenant_id(unverified_claims)
-    auth_config = await resolve_tenant_auth_config(session, tenant_id)
+    routing_tenant_id = _extract_tenant_id(unverified_claims)
+    auth_config = await resolve_tenant_auth_config(session, routing_tenant_id)
     if auth_config.auth_mode == "local":
-        return _validate_local_token(token, auth_config)
-    return await _validate_okta_token(token, auth_config)
+        verified = _validate_local_token(token, auth_config)
+    else:
+        verified = await _validate_okta_token(token, auth_config)
+    if verified.tenant_id != routing_tenant_id:
+        raise _unauthorized("Tenant mismatch in token claims.")
+    return verified
 
 
 def _validate_local_token(token: str, auth_config: TenantAuthConfig) -> ValidatedClaims:
@@ -189,7 +201,7 @@ async def _validate_okta_token(token: str, auth_config: TenantAuthConfig) -> Val
         claims = jwt.decode(
             token,
             key=cast(str | bytes, signing_key),
-            algorithms=["HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+            algorithms=["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
             issuer=auth_config.issuer,
             audience=auth_config.audience,
             options={"require": ["exp", "iss", "aud", "sub", "email"]},

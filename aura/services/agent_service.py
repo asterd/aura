@@ -29,6 +29,15 @@ from aura.adapters.s3.client import S3Client
 
 logger = logging.getLogger("aura")
 
+# Conservative token estimate: ~4 characters per token (GPT-4 average).
+# Using character count avoids undercounting CJK/emoji-dense text that
+# whitespace splitting would miss, reducing risk of budget gate bypass.
+_CHARS_PER_TOKEN = 4
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // _CHARS_PER_TOKEN)
+
 
 @dataclass(slots=True)
 class _KnowledgeSearchResult:
@@ -197,8 +206,8 @@ class AgentService:
                     agent_run_id=persisted.id,
                     credential_id=runtime.credential_id,
                 ),
-                input_tokens=max(1, len(str(request.input).split())),
-                output_tokens=max(0, len(str(transformed_output).split())),
+                input_tokens=_estimate_tokens(str(request.input)),
+                output_tokens=_estimate_tokens(str(transformed_output)),
                 estimated_cost_usd=Decimal("0"),
             )
             await self._audit.emit_agent_run(context=context, run_id=persisted.id)
@@ -217,6 +226,7 @@ class AgentService:
         except RuntimeLoaderError:
             raise
         except Exception as exc:
+            logger.exception("agent_run_failed agent=%s version=%s trace_id=%s", version.name, version.version, context.trace_id)
             persisted = await self._create_run(
                 session=session,
                 context=context,
@@ -224,7 +234,7 @@ class AgentService:
                 request=request,
                 status="failed",
                 output=None,
-                error_message=f"{type(exc).__name__}: {exc}",
+                error_message="Agent run failed.",
                 artifact_refs=artifact_writer.artifact_refs,
             )
             await self._costs.record_usage(
@@ -240,12 +250,11 @@ class AgentService:
                     agent_run_id=persisted.id,
                     credential_id=runtime.credential_id,
                 ),
-                input_tokens=max(1, len(str(request.input).split())),
+                input_tokens=_estimate_tokens(str(request.input)),
                 output_tokens=0,
                 estimated_cost_usd=Decimal("0"),
             )
             await self._audit.emit_agent_run(context=context, run_id=persisted.id)
-            logger.exception("agent_run_failed agent=%s version=%s trace_id=%s", version.name, version.version, context.trace_id)
             return AgentRunResult(
                 run_id=persisted.id,
                 agent_name=version.name,
@@ -253,7 +262,7 @@ class AgentService:
                 status="failed",
                 trace_id=context.trace_id,
                 artifacts=artifact_writer.artifact_refs,
-                error_message=f"{type(exc).__name__}: {exc}",
+                error_message="Agent run failed.",
             )
         finally:
             await self._close_mcp_adapters(mcp_adapters)

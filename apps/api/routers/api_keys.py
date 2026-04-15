@@ -9,11 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import require_identity
 from apps.api.dependencies.db import get_db_session
+from apps.api.dependencies.services import api_key_service as service
 from aura.domain.contracts import UserIdentity
-from aura.services.api_key_service import ApiKeyService
 
 router = APIRouter(prefix="/api/v1/admin/api-keys", tags=["api-keys"])
-service = ApiKeyService()
 
 
 class CreateApiKeyRequest(BaseModel):

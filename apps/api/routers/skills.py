@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,12 @@ class SkillRunResponse(BaseModel):
     wall_time_s: float
 
 
+def _require_admin(context: RequestContext) -> None:
+    if set(context.identity.roles).intersection({"admin", "tenant_admin", "platform_admin"}):
+        return
+    raise HTTPException(status_code=403, detail="Tenant admin role required.")
+
+
 def _to_skill_response(version) -> SkillVersionResponse:
     return SkillVersionResponse(
         id=version.id,
@@ -49,6 +55,7 @@ async def upload_skill(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> SkillVersionResponse:
+    _require_admin(context)
     version = await skill_service.upload_and_validate(
         session=session,
         zip_bytes=await artifact.read() if artifact is not None else None,
@@ -62,8 +69,10 @@ async def upload_skill(
 @router.post("/admin/skills/{skill_version_id}/publish", response_model=SkillVersionResponse)
 async def publish_skill(
     skill_version_id: UUID,
+    context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> SkillVersionResponse:
+    _require_admin(context)
     version = await skill_service.publish(session=session, skill_version_id=skill_version_id)
     return _to_skill_response(version)
 

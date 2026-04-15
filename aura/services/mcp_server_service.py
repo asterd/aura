@@ -60,7 +60,7 @@ class McpServerService:
         try:
             yield self._sse_event("endpoint", f"/mcp/v1/sse/messages/{session_id}")
             while await redis.exists(self._session_key(session_id)):
-                item = await redis.blpop(self._queue_key(session_id), timeout=1)
+                item: tuple[str, str] | None = await redis.blpop([self._queue_key(session_id)], timeout=1)
                 if item is None:
                     yield ": keep-alive\n\n"
                     continue
