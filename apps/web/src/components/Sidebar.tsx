@@ -11,6 +11,7 @@ import {
   deleteConversation,
 } from "@/lib/api";
 import type { ConversationSummary } from "@/lib/types";
+import { CreateSpaceModal } from "./CreateSpaceModal";
 
 const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 min
 
@@ -25,7 +26,7 @@ function groupByDate(threads: ConversationSummary[]) {
   const older: ConversationSummary[] = [];
 
   for (const t of threads) {
-    const d = new Date(t.last_message_at);
+    const d = new Date(t.updated_at);
     if (d >= todayStart) today.push(t);
     else if (d >= weekAgo) last7.push(t);
     else older.push(t);
@@ -54,7 +55,7 @@ function ThreadItem({ thread, isActive, onDelete }: ThreadItemProps) {
       onMouseLeave={() => setShowDelete(false)}
     >
       <Link
-        href={`/chat/${thread.conversation_id}`}
+        href={`/chat/${thread.id}`}
         className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors hover:opacity-80"
         style={{
           backgroundColor: isActive ? "var(--surface-raised)" : "transparent",
@@ -69,7 +70,7 @@ function ThreadItem({ thread, isActive, onDelete }: ThreadItemProps) {
         <button
           onClick={(e) => {
             e.preventDefault();
-            onDelete(thread.conversation_id);
+            onDelete(thread.id);
           }}
           className="absolute right-1 flex-shrink-0 p-1 rounded opacity-60 hover:opacity-100 transition-opacity"
           style={{ color: "var(--muted-foreground)" }}
@@ -103,9 +104,9 @@ function GroupSection({ label, threads, activeThreadId, onDelete }: GroupSection
       </p>
       {threads.map((t) => (
         <ThreadItem
-          key={t.conversation_id}
+          key={t.id}
           thread={t}
-          isActive={activeThreadId === t.conversation_id}
+          isActive={activeThreadId === t.id}
           onDelete={onDelete}
         />
       ))}
@@ -130,6 +131,7 @@ export function Sidebar() {
   } = useAuraStore();
 
   const [loadingMore, setLoadingMore] = useState(false);
+  const [createSpaceOpen, setCreateSpaceOpen] = useState(false);
 
   // Extract active thread from URL
   const urlThreadId = pathname?.startsWith("/chat/")
@@ -217,11 +219,17 @@ export function Sidebar() {
         </span>
       </div>
 
-      {/* New chat */}
-      <div className="px-3 py-3">
+      <CreateSpaceModal
+        open={createSpaceOpen}
+        onClose={() => setCreateSpaceOpen(false)}
+        onCreated={() => void loadInitial()}
+      />
+
+      {/* New chat + New Space */}
+      <div className="px-3 py-3 flex gap-2">
         <Link
           href="/chat"
-          className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
+          className="flex items-center justify-center gap-2 flex-1 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
           style={{
             backgroundColor: "var(--accent)",
             color: "var(--accent-foreground)",
@@ -232,6 +240,21 @@ export function Sidebar() {
           </svg>
           New Chat
         </Link>
+        <button
+          onClick={() => setCreateSpaceOpen(true)}
+          className="flex items-center justify-center w-9 h-9 rounded-lg transition-opacity hover:opacity-80"
+          style={{
+            backgroundColor: "var(--surface-raised)",
+            border: "1px solid var(--border)",
+            color: "var(--muted-foreground)",
+          }}
+          title="Create knowledge space"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11v6m3-3H9" />
+          </svg>
+        </button>
       </div>
 
       {/* Thread history */}
@@ -288,7 +311,7 @@ export function Sidebar() {
             </p>
             {availableSpaces.map((s) => (
               <div
-                key={s.space_id}
+                key={s.id}
                 className="flex items-center gap-2 px-3 py-1.5 text-xs"
                 style={{ color: "var(--muted-foreground)" }}
               >

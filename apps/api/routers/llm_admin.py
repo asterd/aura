@@ -9,15 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
-from apps.api.dependencies.services import (
-    get_cost_management_service,
-    get_litellm_admin_service,
-    get_llm_provider_service,
-)
+from apps.api.dependencies.services import cost_management_service, litellm_admin_service, llm_provider_service
 from aura.domain.contracts import BudgetAction, BudgetScope, BudgetWindow, LlmTaskType, RequestContext
-from aura.services.cost_management_service import CostManagementService
-from aura.services.litellm_admin_service import LiteLLMAdminService
-from aura.services.llm_provider_service import LlmProviderService
 
 
 router = APIRouter(prefix="/api/v1/admin/llm", tags=["llm-admin"])
@@ -127,29 +120,66 @@ def _require_admin(context: RequestContext) -> None:
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant admin role required.")
 
 
+def _to_provider_response(provider) -> ProviderResponse:
+    return ProviderResponse.model_validate(provider, from_attributes=True)
+
+
+def _to_credential_response(credential, provider) -> CredentialResponse:
+    return CredentialResponse(
+        id=credential.id,
+        provider_id=provider.id,
+        provider_key=provider.provider_key,
+        name=credential.name,
+        secret_ref=credential.secret_ref,
+        endpoint_override=credential.endpoint_override,
+        is_default=credential.is_default,
+        status=credential.status,
+    )
+
+
+def _to_model_config_response(model_config, credential, provider) -> ModelConfigResponse:
+    return ModelConfigResponse(
+        id=model_config.id,
+        provider_id=provider.id,
+        provider_key=provider.provider_key,
+        credential_id=credential.id,
+        credential_name=credential.name,
+        task_type=model_config.task_type,
+        model_name=model_config.model_name,
+        alias=model_config.alias,
+        litellm_model_name=model_config.litellm_model_name,
+        input_cost_per_1k=float(model_config.input_cost_per_1k) if model_config.input_cost_per_1k is not None else None,
+        output_cost_per_1k=float(model_config.output_cost_per_1k) if model_config.output_cost_per_1k is not None else None,
+        rate_limit_rpm=model_config.rate_limit_rpm,
+        concurrency_limit=model_config.concurrency_limit,
+        is_default=model_config.is_default,
+        status=model_config.status,
+    )
+
+
+def _to_budget_response(budget) -> BudgetResponse:
+    return BudgetResponse(
+        id=budget.id,
+        scope_type=budget.scope_type,
+        scope_ref=budget.scope_ref,
+        provider_id=budget.provider_id,
+        model_name=budget.model_name,
+        window=budget.window,
+        soft_limit_usd=float(budget.soft_limit_usd) if budget.soft_limit_usd is not None else None,
+        hard_limit_usd=float(budget.hard_limit_usd),
+        action_on_hard_limit=budget.action_on_hard_limit,
+        is_active=budget.is_active,
+    )
+
+
 @router.get("/providers", response_model=list[ProviderResponse])
 async def list_supported_providers(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    llm_provider_service: LlmProviderService = Depends(get_llm_provider_service),
 ) -> list[ProviderResponse]:
     _require_admin(context)
     providers = await llm_provider_service.list_supported_providers(session)
-    return [
-        ProviderResponse(
-            id=provider.id,
-            provider_key=provider.provider_key,
-            display_name=provider.display_name,
-            description=provider.description,
-            supports_chat=provider.supports_chat,
-            supports_embeddings=provider.supports_embeddings,
-            supports_reasoning=provider.supports_reasoning,
-            supports_tools=provider.supports_tools,
-            base_url_hint=provider.base_url_hint,
-            status=provider.status,
-        )
-        for provider in providers
-    ]
+    return [_to_provider_response(provider) for provider in providers]
 
 
 @router.post("/credentials", response_model=CredentialResponse, status_code=status.HTTP_201_CREATED)
@@ -157,8 +187,6 @@ async def register_credential(
     request: CreateCredentialRequest,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    llm_provider_service: LlmProviderService = Depends(get_llm_provider_service),
-    litellm_admin_service: LiteLLMAdminService = Depends(get_litellm_admin_service),
 ) -> CredentialResponse:
     _require_admin(context)
     credential = await llm_provider_service.register_credential(
@@ -175,39 +203,17 @@ async def register_credential(
         provider for provider in await llm_provider_service.list_supported_providers(session) if provider.id == credential.provider_id
     )
     await litellm_admin_service.ensure_tenant_runtime_key(session=session, context=context)
-    return CredentialResponse(
-        id=credential.id,
-        provider_id=credential.provider_id,
-        provider_key=provider.provider_key,
-        name=credential.name,
-        secret_ref=credential.secret_ref,
-        endpoint_override=credential.endpoint_override,
-        is_default=credential.is_default,
-        status=credential.status,
-    )
+    return _to_credential_response(credential, provider)
 
 
 @router.get("/credentials", response_model=list[CredentialResponse])
 async def list_credentials(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    llm_provider_service: LlmProviderService = Depends(get_llm_provider_service),
 ) -> list[CredentialResponse]:
     _require_admin(context)
     rows = await llm_provider_service.list_tenant_credentials(session, context.tenant_id)
-    return [
-        CredentialResponse(
-            id=credential.id,
-            provider_id=provider.id,
-            provider_key=provider.provider_key,
-            name=credential.name,
-            secret_ref=credential.secret_ref,
-            endpoint_override=credential.endpoint_override,
-            is_default=credential.is_default,
-            status=credential.status,
-        )
-        for credential, provider in rows
-    ]
+    return [_to_credential_response(credential, provider) for credential, provider in rows]
 
 
 @router.post("/models", response_model=ModelConfigResponse, status_code=status.HTTP_201_CREATED)
@@ -215,8 +221,6 @@ async def enable_model(
     request: EnableModelRequest,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    llm_provider_service: LlmProviderService = Depends(get_llm_provider_service),
-    litellm_admin_service: LiteLLMAdminService = Depends(get_litellm_admin_service),
 ) -> ModelConfigResponse:
     _require_admin(context)
     config = await llm_provider_service.enable_model(
@@ -239,53 +243,17 @@ async def enable_model(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Model config not found after creation.")
     model_config, credential, provider = match
     await litellm_admin_service.ensure_tenant_runtime_key(session=session, context=context)
-    return ModelConfigResponse(
-        id=model_config.id,
-        provider_id=provider.id,
-        provider_key=provider.provider_key,
-        credential_id=credential.id,
-        credential_name=credential.name,
-        task_type=model_config.task_type,
-        model_name=model_config.model_name,
-        alias=model_config.alias,
-        litellm_model_name=model_config.litellm_model_name,
-        input_cost_per_1k=float(model_config.input_cost_per_1k) if model_config.input_cost_per_1k is not None else None,
-        output_cost_per_1k=float(model_config.output_cost_per_1k) if model_config.output_cost_per_1k is not None else None,
-        rate_limit_rpm=model_config.rate_limit_rpm,
-        concurrency_limit=model_config.concurrency_limit,
-        is_default=model_config.is_default,
-        status=model_config.status,
-    )
+    return _to_model_config_response(model_config, credential, provider)
 
 
 @router.get("/models", response_model=list[ModelConfigResponse])
 async def list_models(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    llm_provider_service: LlmProviderService = Depends(get_llm_provider_service),
 ) -> list[ModelConfigResponse]:
     _require_admin(context)
     rows = await llm_provider_service.list_tenant_models(session, context.tenant_id)
-    return [
-        ModelConfigResponse(
-            id=model_config.id,
-            provider_id=provider.id,
-            provider_key=provider.provider_key,
-            credential_id=credential.id,
-            credential_name=credential.name,
-            task_type=model_config.task_type,
-            model_name=model_config.model_name,
-            alias=model_config.alias,
-            litellm_model_name=model_config.litellm_model_name,
-            input_cost_per_1k=float(model_config.input_cost_per_1k) if model_config.input_cost_per_1k is not None else None,
-            output_cost_per_1k=float(model_config.output_cost_per_1k) if model_config.output_cost_per_1k is not None else None,
-            rate_limit_rpm=model_config.rate_limit_rpm,
-            concurrency_limit=model_config.concurrency_limit,
-            is_default=model_config.is_default,
-            status=model_config.status,
-        )
-        for model_config, credential, provider in rows
-    ]
+    return [_to_model_config_response(model_config, credential, provider) for model_config, credential, provider in rows]
 
 
 @router.post("/budgets", response_model=BudgetResponse, status_code=status.HTTP_201_CREATED)
@@ -293,8 +261,6 @@ async def create_or_update_budget(
     request: CreateBudgetRequest,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    cost_management_service: CostManagementService = Depends(get_cost_management_service),
-    litellm_admin_service: LiteLLMAdminService = Depends(get_litellm_admin_service),
 ) -> BudgetResponse:
     _require_admin(context)
     budget = await cost_management_service.create_or_update_budget(
@@ -310,43 +276,17 @@ async def create_or_update_budget(
         action_on_hard_limit=request.action_on_hard_limit,
     )
     await litellm_admin_service.ensure_tenant_runtime_key(session=session, context=context)
-    return BudgetResponse(
-        id=budget.id,
-        scope_type=budget.scope_type,
-        scope_ref=budget.scope_ref,
-        provider_id=budget.provider_id,
-        model_name=budget.model_name,
-        window=budget.window,
-        soft_limit_usd=float(budget.soft_limit_usd) if budget.soft_limit_usd is not None else None,
-        hard_limit_usd=float(budget.hard_limit_usd),
-        action_on_hard_limit=budget.action_on_hard_limit,
-        is_active=budget.is_active,
-    )
+    return _to_budget_response(budget)
 
 
 @router.get("/budgets", response_model=list[BudgetResponse])
 async def list_budgets(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    cost_management_service: CostManagementService = Depends(get_cost_management_service),
 ) -> list[BudgetResponse]:
     _require_admin(context)
     budgets = await cost_management_service.list_budgets(session, context.tenant_id)
-    return [
-        BudgetResponse(
-            id=budget.id,
-            scope_type=budget.scope_type,
-            scope_ref=budget.scope_ref,
-            provider_id=budget.provider_id,
-            model_name=budget.model_name,
-            window=budget.window,
-            soft_limit_usd=float(budget.soft_limit_usd) if budget.soft_limit_usd is not None else None,
-            hard_limit_usd=float(budget.hard_limit_usd),
-            action_on_hard_limit=budget.action_on_hard_limit,
-            is_active=budget.is_active,
-        )
-        for budget in budgets
-    ]
+    return [_to_budget_response(budget) for budget in budgets]
 
 
 @router.get("/usage")
@@ -354,7 +294,6 @@ async def get_usage(
     days: int = Query(default=30, ge=1, le=365),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    cost_management_service: CostManagementService = Depends(get_cost_management_service),
 ) -> dict[str, object]:
     _require_admin(context)
     return {"items": await cost_management_service.aggregate_usage(session=session, tenant_id=context.tenant_id, days=days)}
@@ -364,7 +303,6 @@ async def get_usage(
 async def get_runtime_key_state(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    litellm_admin_service: LiteLLMAdminService = Depends(get_litellm_admin_service),
 ) -> RuntimeKeyResponse:
     _require_admin(context)
     state = await litellm_admin_service.get_tenant_runtime_key_state(session=session, context=context)
@@ -383,7 +321,6 @@ async def get_runtime_key_state(
 async def sync_runtime_key(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    litellm_admin_service: LiteLLMAdminService = Depends(get_litellm_admin_service),
 ) -> RuntimeKeyResponse:
     _require_admin(context)
     state = await litellm_admin_service.ensure_tenant_runtime_key(session=session, context=context)

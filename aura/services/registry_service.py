@@ -112,8 +112,7 @@ class RegistryService:
         await session.flush()
         return version
 
-    async def publish(self, session: AsyncSession, agent_version_id: UUID, published_by: UUID) -> AgentVersion:
-        del published_by
+    async def publish(self, session: AsyncSession, agent_version_id: UUID) -> AgentVersion:
         version = await session.scalar(select(AgentVersion).where(AgentVersion.id == agent_version_id))
         if version is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent version not found.")
@@ -185,10 +184,6 @@ class RegistryService:
             created_by=version.created_by,
             created_at=version.created_at,
         )
-
-    async def get_runtime_artifact_ref(self, session: AsyncSession, version: ResolvedAgentVersion) -> str:
-        del session
-        return version.artifact_ref
 
     async def list_versions(self, session: AsyncSession, tenant_id: UUID) -> list[ResolvedAgentVersion]:
         rows = (

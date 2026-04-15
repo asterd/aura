@@ -59,6 +59,23 @@ interface AuraStore {
   setAvailableModels: (models: string[], defaultModel: string) => void;
 }
 
+function patchMessageAcrossThreads(
+  threadMessages: Record<string, Message[]>,
+  messageId: string,
+  update: (message: Message) => Message
+): Record<string, Message[]> {
+  const next = { ...threadMessages };
+  for (const threadId in next) {
+    const index = next[threadId].findIndex((message) => message.message_id === messageId);
+    if (index === -1) continue;
+    next[threadId] = next[threadId].map((message, currentIndex) =>
+      currentIndex === index ? update(message) : message
+    );
+    break;
+  }
+  return next;
+}
+
 export const useAuraStore = create<AuraStore>()((set, get) => ({
   threads: [],
   threadsCursor: null,
@@ -84,12 +101,12 @@ export const useAuraStore = create<AuraStore>()((set, get) => ({
   upsertThread: (thread) =>
     set((s) => {
       const exists = s.threads.find(
-        (t) => t.conversation_id === thread.conversation_id
+        (t) => t.id === thread.id
       );
       if (exists) {
         return {
           threads: s.threads.map((t) =>
-            t.conversation_id === thread.conversation_id ? thread : t
+            t.id === thread.id ? thread : t
           ),
         };
       }
@@ -98,7 +115,7 @@ export const useAuraStore = create<AuraStore>()((set, get) => ({
 
   removeThread: (id) =>
     set((s) => ({
-      threads: s.threads.filter((t) => t.conversation_id !== id),
+      threads: s.threads.filter((t) => t.id !== id),
       activeThreadId:
         s.activeThreadId === id ? null : s.activeThreadId,
     })),
@@ -140,88 +157,56 @@ export const useAuraStore = create<AuraStore>()((set, get) => ({
   appendToken: (token) =>
     set((s) => {
       const newBuffer = s.streamBuffer + token;
-      // Also update the message content live
       const mid = s.streamingMessageId;
       if (!mid) return { streamBuffer: newBuffer };
-      const threadMessages = { ...s.threadMessages };
-      for (const tid in threadMessages) {
-        const idx = threadMessages[tid].findIndex((m) => m.message_id === mid);
-        if (idx !== -1) {
-          threadMessages[tid] = threadMessages[tid].map((m, i) =>
-            i === idx ? { ...m, content: newBuffer, status: "STREAMING" } : m
-          );
-          break;
-        }
-      }
-      return { streamBuffer: newBuffer, threadMessages };
+      return {
+        streamBuffer: newBuffer,
+        threadMessages: patchMessageAcrossThreads(s.threadMessages, mid, (message) => ({
+          ...message,
+          content: newBuffer,
+          status: "STREAMING",
+        })),
+      };
     }),
 
   addCitation: (messageId, citation) =>
     set((s) => {
-      const threadMessages = { ...s.threadMessages };
-      for (const tid in threadMessages) {
-        const idx = threadMessages[tid].findIndex((m) => m.message_id === messageId);
-        if (idx !== -1) {
-          threadMessages[tid] = threadMessages[tid].map((m, i) =>
-            i === idx
-              ? { ...m, citations: [...m.citations, citation] }
-              : m
-          );
-          break;
-        }
-      }
-      return { threadMessages };
+      return {
+        threadMessages: patchMessageAcrossThreads(s.threadMessages, messageId, (message) => ({
+          ...message,
+          citations: [...message.citations, citation],
+        })),
+      };
     }),
 
   addArtifact: (messageId, artifact) =>
     set((s) => {
-      const threadMessages = { ...s.threadMessages };
-      for (const tid in threadMessages) {
-        const idx = threadMessages[tid].findIndex((m) => m.message_id === messageId);
-        if (idx !== -1) {
-          threadMessages[tid] = threadMessages[tid].map((m, i) =>
-            i === idx
-              ? { ...m, artifacts: [...m.artifacts, artifact] }
-              : m
-          );
-          break;
-        }
-      }
-      return { threadMessages };
+      return {
+        threadMessages: patchMessageAcrossThreads(s.threadMessages, messageId, (message) => ({
+          ...message,
+          artifacts: [...message.artifacts, artifact],
+        })),
+      };
     }),
 
   setAgentRunning: (messageId, agentName, runId) =>
     set((s) => {
-      const threadMessages = { ...s.threadMessages };
-      for (const tid in threadMessages) {
-        const idx = threadMessages[tid].findIndex((m) => m.message_id === messageId);
-        if (idx !== -1) {
-          threadMessages[tid] = threadMessages[tid].map((m, i) =>
-            i === idx
-              ? { ...m, agent_running: { agent_name: agentName, run_id: runId } }
-              : m
-          );
-          break;
-        }
-      }
-      return { threadMessages };
+      return {
+        threadMessages: patchMessageAcrossThreads(s.threadMessages, messageId, (message) => ({
+          ...message,
+          agent_running: { agent_name: agentName, run_id: runId },
+        })),
+      };
     }),
 
   clearAgentRunning: (messageId) =>
     set((s) => {
-      const threadMessages = { ...s.threadMessages };
-      for (const tid in threadMessages) {
-        const idx = threadMessages[tid].findIndex((m) => m.message_id === messageId);
-        if (idx !== -1) {
-          threadMessages[tid] = threadMessages[tid].map((m, i) => {
-            if (i !== idx) return m;
-            const { agent_running: _, ...rest } = m;
-            return rest as Message;
-          });
-          break;
-        }
-      }
-      return { threadMessages };
+      return {
+        threadMessages: patchMessageAcrossThreads(s.threadMessages, messageId, (message) => {
+          const { agent_running: _, ...rest } = message;
+          return rest as Message;
+        }),
+      };
     }),
 
   finalizeMessage: (serverMessageId, traceId) =>
@@ -230,46 +215,29 @@ export const useAuraStore = create<AuraStore>()((set, get) => ({
       const streamingMessageId = s.streamingMessageId;
 
       if (streamingMessageId) {
-        for (const tid in threadMessages) {
-          const idx = threadMessages[tid].findIndex(
-            (m) => m.message_id === streamingMessageId
-          );
-          if (idx !== -1) {
-            threadMessages[tid] = threadMessages[tid].map((m, i) => {
-              if (i !== idx) return m;
-              const { agent_running: _, ...rest } = m;
-              return {
-                ...rest,
-                message_id: serverMessageId,
-                status: "DONE",
-                trace_id: traceId,
-              } as Message;
-            });
+        return {
+          threadMessages: patchMessageAcrossThreads(threadMessages, streamingMessageId, (message) => {
+            const { agent_running: _, ...rest } = message;
             return {
-              threadMessages,
-              isStreaming: false,
-              streamingMessageId: null,
-              streamBuffer: "",
-            };
-          }
-        }
+              ...rest,
+              message_id: serverMessageId,
+              status: "DONE",
+              trace_id: traceId,
+            } as Message;
+          }),
+          isStreaming: false,
+          streamingMessageId: null,
+          streamBuffer: "",
+        };
       }
 
-      for (const tid in threadMessages) {
-        const idx = threadMessages[tid].findIndex(
-          (m) => m.message_id === serverMessageId
-        );
-        if (idx !== -1) {
-          threadMessages[tid] = threadMessages[tid].map((m, i) =>
-            i === idx
-              ? { ...m, status: "DONE", trace_id: traceId, message_id: serverMessageId }
-              : m
-          );
-          break;
-        }
-      }
       return {
-        threadMessages,
+        threadMessages: patchMessageAcrossThreads(threadMessages, serverMessageId, (message) => ({
+          ...message,
+          status: "DONE",
+          trace_id: traceId,
+          message_id: serverMessageId,
+        })),
         isStreaming: false,
         streamingMessageId: null,
         streamBuffer: "",
@@ -278,18 +246,12 @@ export const useAuraStore = create<AuraStore>()((set, get) => ({
 
   setStreamingError: (messageId, error) =>
     set((s) => {
-      const threadMessages = { ...s.threadMessages };
-      for (const tid in threadMessages) {
-        const idx = threadMessages[tid].findIndex((m) => m.message_id === messageId);
-        if (idx !== -1) {
-          threadMessages[tid] = threadMessages[tid].map((m, i) =>
-            i === idx ? { ...m, status: "ERROR", error } : m
-          );
-          break;
-        }
-      }
       return {
-        threadMessages,
+        threadMessages: patchMessageAcrossThreads(s.threadMessages, messageId, (message) => ({
+          ...message,
+          status: "ERROR",
+          error,
+        })),
         isStreaming: false,
         streamingMessageId: null,
         streamBuffer: "",

@@ -8,11 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
-from apps.api.dependencies.services import get_agent_service, get_registry_service, get_trigger_scheduler_service
+from apps.api.dependencies.services import agent_service, registry_service, trigger_scheduler_service
 from aura.domain.contracts import AgentRunRequest, AgentRunResult, RequestContext
-from aura.services.agent_service import AgentService
-from aura.services.registry_service import RegistryService
-from aura.services.trigger_scheduler_service import TriggerSchedulerService
 
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
@@ -35,13 +32,23 @@ class AgentSummaryResponse(BaseModel):
     status: str
 
 
+def _to_version_response(version) -> AgentVersionResponse:
+    return AgentVersionResponse(
+        id=version.id,
+        name=version.manifest["name"],
+        version=version.version,
+        status=version.status,
+        agent_type=version.agent_type,
+        entrypoint=version.entrypoint,
+    )
+
+
 @router.post("/agents/{name}/run", response_model=AgentRunResult)
 async def run_agent(
     name: str,
     payload: dict,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    agent_service: AgentService = Depends(get_agent_service),
 ) -> AgentRunResult:
     request = AgentRunRequest(
         agent_name=name,
@@ -56,7 +63,6 @@ async def run_agent(
 async def list_published_agents(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    registry_service: RegistryService = Depends(get_registry_service),
 ) -> list[AgentSummaryResponse]:
     versions = await registry_service.list_versions(session, context.tenant_id)
     latest_by_name: dict[str, AgentSummaryResponse] = {}
@@ -82,7 +88,6 @@ async def upload_agent(
     artifact: UploadFile = File(...),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    registry_service: RegistryService = Depends(get_registry_service),
 ) -> AgentVersionResponse:
     version = await registry_service.upload_and_validate(
         session=session,
@@ -91,14 +96,7 @@ async def upload_agent(
         uploaded_by=context.identity.user_id,
         tenant_id=context.tenant_id,
     )
-    return AgentVersionResponse(
-        id=version.id,
-        name=version.manifest["name"],
-        version=version.version,
-        status=version.status,
-        agent_type=version.agent_type,
-        entrypoint=version.entrypoint,
-    )
+    return _to_version_response(version)
 
 
 @router.post("/admin/agents/{agent_version_id}/publish", response_model=AgentVersionResponse)
@@ -106,15 +104,13 @@ async def publish_agent(
     agent_version_id: UUID,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    registry_service: RegistryService = Depends(get_registry_service),
-    trigger_scheduler: TriggerSchedulerService = Depends(get_trigger_scheduler_service),
 ) -> AgentVersionResponse:
-    version = await registry_service.publish(session, agent_version_id, context.identity.user_id)
+    version = await registry_service.publish(session, agent_version_id)
     for trigger in version.manifest.get("triggers") or []:
         if trigger.get("type") == "cron":
             from aura.domain.contracts import CronTrigger
 
-            await trigger_scheduler.register_cron(
+            await trigger_scheduler_service.register_cron(
                 session=session,
                 agent_version_id=version.id,
                 trigger=CronTrigger.model_validate(trigger),
@@ -133,21 +129,13 @@ async def publish_agent(
                 )
             )
     await session.flush()
-    return AgentVersionResponse(
-        id=version.id,
-        name=version.manifest["name"],
-        version=version.version,
-        status=version.status,
-        agent_type=version.agent_type,
-        entrypoint=version.entrypoint,
-    )
+    return _to_version_response(version)
 
 
 @router.get("/admin/agents", response_model=list[AgentVersionResponse])
 async def list_agents(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    registry_service: RegistryService = Depends(get_registry_service),
 ) -> list[AgentVersionResponse]:
     versions = await registry_service.list_versions(session, context.tenant_id)
     return [

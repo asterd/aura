@@ -25,7 +25,7 @@ export function SpaceSelector({ spaces, selectedIds, onChange, disabled }: Props
     selectedIds.length === 0
       ? "Free Chat"
       : selectedIds.length === 1
-      ? (spaces.find((s) => s.space_id === selectedIds[0])?.name ?? "1 space")
+      ? (spaces.find((s) => s.id === selectedIds[0])?.name ?? "1 space")
       : `${selectedIds.length} spaces`;
 
   const isFreeChatMode = selectedIds.length === 0;
@@ -119,15 +119,15 @@ export function SpaceSelector({ spaces, selectedIds, onChange, disabled }: Props
               </div>
             ) : (
               spaces.map((space) => {
-                const selected = selectedIds.includes(space.space_id);
+                const selected = selectedIds.includes(space.id);
                 return (
                   <button
-                    key={space.space_id}
+                    key={space.id}
                     role="option"
                     aria-selected={selected}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      toggle(space.space_id);
+                      toggle(space.id);
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:opacity-80 transition-opacity"
                     style={{ borderBottom: "1px solid var(--border)" }}
@@ -137,9 +137,9 @@ export function SpaceSelector({ spaces, selectedIds, onChange, disabled }: Props
                       <span className="text-sm font-medium truncate w-full" style={{ color: "var(--foreground)" }}>
                         {space.name}
                       </span>
-                      {space.description && (
+                      {space.slug && (
                         <span className="text-xs truncate w-full" style={{ color: "var(--muted-foreground)" }}>
-                          {space.description}
+                          {space.slug}
                         </span>
                       )}
                     </div>

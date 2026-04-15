@@ -1,0 +1,35 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to staging
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend Docker images
+        run: |
+          docker build -t aura-api:${{ github.sha }} -f infra/docker/Dockerfile.api .
+          docker build -t aura-worker:${{ github.sha }} -f infra/docker/Dockerfile.worker .
+
+      - name: Build frontend Docker image
+        run: |
+          docker build -t aura-web:${{ github.sha }} -f infra/docker/Dockerfile.web apps/web/
+
+      # Adattare al proprio sistema di deploy (ECS, Fly.io, k8s, etc.)
+      # Esempio per Fly.io:
+      # - name: Deploy API
+      #   run: flyctl deploy --image aura-api:${{ github.sha }}
+      #   env:
+      #     FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Run smoke test
+        run: |
+          sleep 10
+          curl -f ${{ vars.STAGING_URL }}/api/v1/health || exit 1

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuraStore } from "@/lib/store";
 import { MessageBubble } from "./MessageBubble";
 import { Composer } from "./Composer";
+import { OnboardingBanner } from "./OnboardingBanner";
+import { CreateSpaceModal } from "./CreateSpaceModal";
 import { useRouter } from "next/navigation";
 
 interface Props {
@@ -14,6 +16,7 @@ export function ChatArea({ threadId }: Props) {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { threadMessages, isStreaming } = useAuraStore();
+  const [createSpaceOpen, setCreateSpaceOpen] = useState(false);
 
   const messages = threadId ? (threadMessages[threadId] ?? []) : [];
 
@@ -36,8 +39,17 @@ export function ChatArea({ threadId }: Props) {
 
   return (
     <div className="flex flex-col h-full">
+      <CreateSpaceModal
+        open={createSpaceOpen}
+        onClose={() => setCreateSpaceOpen(false)}
+        onCreated={() => {
+          // Space added to store by CreateSpaceModal — banner will auto-hide
+        }}
+      />
+
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto py-4 space-y-1">
+        <OnboardingBanner onCreateSpace={() => setCreateSpaceOpen(true)} />
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-4 py-20">
             <div

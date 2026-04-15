@@ -24,10 +24,8 @@ class EventDispatcherService:
     def __init__(
         self,
         *,
-        agent_service=None,
         registry_service: RegistryService | None = None,
     ) -> None:
-        del agent_service
         self._registry = registry_service or RegistryService()
 
     async def publish(self, tenant_id, event: InternalEvent) -> None:
@@ -40,11 +38,11 @@ class EventDispatcherService:
     async def dispatch(self, session: AsyncSession, event: InternalEvent) -> list[str]:
         redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
         try:
-            return await self.dispatch_with_redis(session=session, event=event, redis=redis)
+            return await self._dispatch_with_redis(session=session, event=event, redis=redis)
         finally:
             await redis.aclose()
 
-    async def dispatch_with_redis(self, session: AsyncSession, event: InternalEvent, redis: ArqRedis) -> list[str]:
+    async def _dispatch_with_redis(self, session: AsyncSession, event: InternalEvent, redis: ArqRedis) -> list[str]:
         registrations = (
             await session.execute(
                 select(AgentTriggerRegistration).where(
@@ -90,7 +88,7 @@ class EventDispatcherService:
                 async with AsyncSessionLocal() as session:
                     async with session.begin():
                         await set_tenant_rls(session, event.tenant_id)
-                        await self.dispatch_with_redis(session=session, event=event, redis=redis)
+                        await self._dispatch_with_redis(session=session, event=event, redis=redis)
         finally:
             await redis.aclose()
 

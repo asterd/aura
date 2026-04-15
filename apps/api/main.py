@@ -32,7 +32,7 @@ from apps.api.routers.spaces import router as spaces_router
 from apps.api.routers.skills import router as skills_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.webhooks import router as webhooks_router
-from aura.adapters.sandbox.factory import get_default as get_default_sandbox_provider
+from apps.api.dependencies.services import sandbox_provider as _sandbox_provider
 from aura.adapters.db.session import AsyncSessionLocal
 from aura.adapters.db.models import Group
 from aura.adapters.db.models import User as DbUser
@@ -178,7 +178,6 @@ async def _identity_sync_freshness_seconds() -> float:
 
 @app.get(f"{settings.api_prefix}/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    sandbox_provider = get_default_sandbox_provider()
     component_checks = {
         "postgres": _check_postgres(),
         "redis": _check_redis(),
@@ -187,7 +186,7 @@ async def health() -> HealthResponse:
         "litellm": _check_http(str(settings.litellm_base_url), ("/health/readiness", "/health", "/")),
         "okta": _check_okta_jwks(),
         "langfuse": _check_http(str(settings.langfuse_base_url), ("/api/public/health", "/api/health", "/")),
-        "sandbox": sandbox_provider.health_check(),
+        "sandbox": _sandbox_provider.health_check(),
     }
     raw_results = {name: await check for name, check in component_checks.items()}
     results = {

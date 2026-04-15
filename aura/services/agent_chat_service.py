@@ -51,10 +51,10 @@ class AgentChatService:
     async def respond(self, *, session, ctx, request: ChatRequest, history: list[dict]):
         invocations = await self._resolve_invocations(session=session, tenant_id=ctx.tenant_id, request=request)
         retrieval_task = asyncio.create_task(
-            self._retrieval.retrieve(
+            self._chat.resolve_retrieval_result(
                 session=session,
-                request=self._build_retrieval_request(request),
                 context=ctx,
+                request=request,
             )
         )
         agent_tasks = [
@@ -86,18 +86,18 @@ class AgentChatService:
 
     async def respond_stream(self, *, session, ctx, request: ChatRequest, history: list[dict]) -> AsyncGenerator[ChatStreamEvent, None]:
         invocations = await self._resolve_invocations(session=session, tenant_id=ctx.tenant_id, request=request)
-        run_ids = {self._invocation_key(resolved.invocation): uuid4() for resolved in invocations}
+        run_ids = {(r.invocation.agent_name, r.invocation.agent_version): uuid4() for r in invocations}
         for resolved in invocations:
             yield ChatStreamEventAgentRunning(
                 type="agent_running",
                 agent_name=resolved.invocation.agent_name,
-                run_id=run_ids[self._invocation_key(resolved.invocation)],
+                run_id=run_ids[(resolved.invocation.agent_name, resolved.invocation.agent_version)],
             )
         retrieval_task = asyncio.create_task(
-            self._retrieval.retrieve(
+            self._chat.resolve_retrieval_result(
                 session=session,
-                request=self._build_retrieval_request(request),
                 context=ctx,
+                request=request,
             )
         )
         agent_tasks = [
@@ -110,7 +110,7 @@ class AgentChatService:
                     history,
                     request.conversation_id,
                     request.space_ids,
-                    run_ids[self._invocation_key(resolved.invocation)],
+                    run_ids[(resolved.invocation.agent_name, resolved.invocation.agent_version)],
                 )
             )
             for resolved in invocations
@@ -131,7 +131,7 @@ class AgentChatService:
                 yield ChatStreamEventAgentDone(
                     type="agent_done",
                     agent_name=invocation.agent_name,
-                    run_id=run_ids[self._invocation_key(invocation)],
+                    run_id=run_ids[(invocation.agent_name, invocation.agent_version)],
                     status="failed",
                     artifacts=[],
                 )
@@ -178,9 +178,9 @@ class AgentChatService:
         merged: dict[tuple[str, str | None], _ResolvedInvocation] = {}
         for name in self._parse_mentions(request.message):
             invocation = AgentInvocation(agent_name=name)
-            merged[self._invocation_key(invocation)] = _ResolvedInvocation(invocation=invocation, invocation_mode="mention")
+            merged[(invocation.agent_name, invocation.agent_version)] = _ResolvedInvocation(invocation=invocation, invocation_mode="mention")
         for invocation in request.invoked_agents:
-            merged[self._invocation_key(invocation)] = _ResolvedInvocation(invocation=invocation, invocation_mode="explicit")
+            merged[(invocation.agent_name, invocation.agent_version)] = _ResolvedInvocation(invocation=invocation, invocation_mode="explicit")
         if request.active_agent_ids:
             versions = await self._registry.list_versions(session, tenant_id)
             published_by_id = {version.id: version for version in versions if version.status == "published"}
@@ -189,21 +189,11 @@ class AgentChatService:
                 if version is None:
                     continue
                 invocation = AgentInvocation(agent_name=version.name, agent_version=version.version)
-                merged[self._invocation_key(invocation)] = _ResolvedInvocation(invocation=invocation, invocation_mode="explicit")
+                merged[(invocation.agent_name, invocation.agent_version)] = _ResolvedInvocation(invocation=invocation, invocation_mode="explicit")
         return list(merged.values())[:5]
 
     def _parse_mentions(self, message: str) -> list[str]:
         return re.findall(r"@([a-zA-Z0-9_-]+)", message)
-
-    def _build_retrieval_request(self, request: ChatRequest):
-        from aura.domain.contracts import RetrievalRequest
-
-        return RetrievalRequest(
-            query=request.message,
-            space_ids=request.space_ids,
-            conversation_id=request.conversation_id,
-            retrieval_profile_id=request.retrieval_profile_id,
-        )
 
     def _build_enhanced_context(
         self,
@@ -250,5 +240,3 @@ class AgentChatService:
                 collected.append({"result": result, "invocation_mode": resolved.invocation_mode})
         return collected
 
-    def _invocation_key(self, invocation: AgentInvocation) -> tuple[str, str | None]:
-        return invocation.agent_name, invocation.agent_version

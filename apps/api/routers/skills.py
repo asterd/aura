@@ -8,9 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
-from apps.api.dependencies.services import get_skill_service
+from apps.api.dependencies.services import skill_service
 from aura.domain.contracts import RequestContext
-from aura.services.skill_service import SkillService
 
 
 router = APIRouter(prefix="/api/v1", tags=["skills"])
@@ -33,13 +32,22 @@ class SkillRunResponse(BaseModel):
     wall_time_s: float
 
 
+def _to_skill_response(version) -> SkillVersionResponse:
+    return SkillVersionResponse(
+        id=version.id,
+        name=version.manifest["name"],
+        version=version.version,
+        status=version.status,
+        entrypoint=version.entrypoint,
+    )
+
+
 @router.post("/admin/skills/upload", response_model=SkillVersionResponse)
 async def upload_skill(
     manifest: str = Form(...),
     artifact: UploadFile | None = File(default=None),
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    skill_service: SkillService = Depends(get_skill_service),
 ) -> SkillVersionResponse:
     version = await skill_service.upload_and_validate(
         session=session,
@@ -48,36 +56,22 @@ async def upload_skill(
         uploaded_by=context.identity.user_id,
         tenant_id=context.tenant_id,
     )
-    return SkillVersionResponse(
-        id=version.id,
-        name=version.manifest["name"],
-        version=version.version,
-        status=version.status,
-        entrypoint=version.entrypoint,
-    )
+    return _to_skill_response(version)
 
 
 @router.post("/admin/skills/{skill_version_id}/publish", response_model=SkillVersionResponse)
 async def publish_skill(
     skill_version_id: UUID,
     session: AsyncSession = Depends(get_db_session),
-    skill_service: SkillService = Depends(get_skill_service),
 ) -> SkillVersionResponse:
     version = await skill_service.publish(session=session, skill_version_id=skill_version_id)
-    return SkillVersionResponse(
-        id=version.id,
-        name=version.manifest["name"],
-        version=version.version,
-        status=version.status,
-        entrypoint=version.entrypoint,
-    )
+    return _to_skill_response(version)
 
 
 @router.get("/admin/skills", response_model=list[SkillVersionResponse])
 async def list_skills(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    skill_service: SkillService = Depends(get_skill_service),
 ) -> list[SkillVersionResponse]:
     versions = await skill_service.list_versions(session=session, tenant_id=context.tenant_id)
     return [
@@ -98,7 +92,6 @@ async def run_skill(
     payload: dict,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    skill_service: SkillService = Depends(get_skill_service),
 ) -> SkillRunResponse:
     result = await skill_service.execute_skill(
         session=session,

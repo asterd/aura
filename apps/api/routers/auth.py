@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, EmailStr, SecretStr
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel, EmailStr, Field, SecretStr
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.dependencies.db import get_unscoped_db_session
+from apps.api.dependencies.auth import require_identity
+from apps.api.dependencies.db import get_db_session, get_unscoped_db_session
+from aura.adapters.db.models import User
+from aura.domain.contracts import UserIdentity
 from aura.services.identity import issue_local_access_token
+from aura.utils.passwords import hash_password, verify_password
 
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -34,3 +39,72 @@ async def local_login(
         password=request.password.get_secret_value(),
     )
     return LocalLoginResponse(access_token=token)
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str | None = None
+
+
+class ProfileResponse(BaseModel):
+    user_id: str
+    email: str
+    display_name: str | None
+    roles: list[str]
+    tenant_id: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+
+
+@router.patch("/me", response_model=ProfileResponse)
+async def update_profile(
+    payload: UpdateProfileRequest,
+    identity: UserIdentity = Depends(require_identity),
+    session: AsyncSession = Depends(get_db_session),
+) -> ProfileResponse:
+    """Aggiorna il profilo dell'utente corrente."""
+    if payload.display_name is not None:
+        await session.execute(
+            update(User)
+            .where(User.id == identity.user_id)
+            .values(display_name=payload.display_name)
+        )
+        await session.flush()
+    user = await session.get(User, identity.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return ProfileResponse(
+        user_id=str(user.id),
+        email=user.email,
+        display_name=user.display_name,
+        roles=identity.roles,
+        tenant_id=str(identity.tenant_id),
+    )
+
+
+@router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: ChangePasswordRequest,
+    identity: UserIdentity = Depends(require_identity),
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Cambio password per utenti local-auth. Noop per Okta."""
+    user = await session.get(User, identity.user_id)
+    if user is None or not hasattr(user, "password_hash") or user.password_hash is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password change not available for this auth mode",
+        )
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+    await session.execute(
+        update(User)
+        .where(User.id == identity.user_id)
+        .values(password_hash=hash_password(payload.new_password))
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

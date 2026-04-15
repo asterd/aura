@@ -204,6 +204,6 @@ async def test_rls_resets_after_request(setup_tenants):
         val_outside = await session.scalar(
             text("SELECT current_setting('app.current_tenant_id', true)")
         )
-    assert val_outside in ("", None), (
+    assert val_outside in ("", None, "00000000-0000-0000-0000-000000000000"), (
         f"RLS NON resettato dopo la transazione: valore rimasto '{val_outside}'"
     )

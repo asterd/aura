@@ -42,79 +42,29 @@ class PiiService:
         self._policy_service = policy_service or PolicyService()
         self._analyzer = self._build_presidio_analyzer()
 
-    async def transform_input_if_needed(
-        self,
-        *,
-        session: AsyncSession,
-        context: RequestContext,
-        text: str,
-        policy_entity: Any = None,
-    ) -> PiiTransformResult:
+    async def _resolve_and_transform(self, *, session: AsyncSession, context: RequestContext, text: str, policy_entity: Any, sink: str) -> PiiTransformResult:
         policy = await self._policy_service.resolve_pii_policy(session, policy_entity, context)
-        return self._transform_text(text=text, policy=policy, sink="input")
+        return self._transform_text(text=text, policy=policy, sink=sink)
 
-    async def transform_output_if_needed(
-        self,
-        *,
-        session: AsyncSession,
-        context: RequestContext,
-        text: str,
-        policy_entity: Any = None,
-    ) -> PiiTransformResult:
-        policy = await self._policy_service.resolve_pii_policy(session, policy_entity, context)
-        return self._transform_text(text=text, policy=policy, sink="output")
+    async def transform_input_if_needed(self, *, session: AsyncSession, context: RequestContext, text: str, policy_entity: Any = None) -> PiiTransformResult:
+        return await self._resolve_and_transform(session=session, context=context, text=text, policy_entity=policy_entity, sink="input")
 
-    async def transform_persisted_text_if_needed(
-        self,
-        *,
-        session: AsyncSession,
-        context: RequestContext,
-        text: str,
-        policy_entity: Any = None,
-    ) -> PiiTransformResult:
-        policy = await self._policy_service.resolve_pii_policy(session, policy_entity, context)
-        return self._transform_text(text=text, policy=policy, sink="persistence")
+    async def transform_output_if_needed(self, *, session: AsyncSession, context: RequestContext, text: str, policy_entity: Any = None) -> PiiTransformResult:
+        return await self._resolve_and_transform(session=session, context=context, text=text, policy_entity=policy_entity, sink="output")
 
-    async def transform_log_text_if_needed(
-        self,
-        *,
-        session: AsyncSession,
-        context: RequestContext,
-        text: str,
-        policy_entity: Any = None,
-    ) -> PiiTransformResult:
-        policy = await self._policy_service.resolve_pii_policy(session, policy_entity, context)
-        return self._transform_text(text=text, policy=policy, sink="logs")
+    async def transform_persisted_text_if_needed(self, *, session: AsyncSession, context: RequestContext, text: str, policy_entity: Any = None) -> PiiTransformResult:
+        return await self._resolve_and_transform(session=session, context=context, text=text, policy_entity=policy_entity, sink="persistence")
 
-    async def transform_trace_text_if_needed(
-        self,
-        *,
-        session: AsyncSession,
-        context: RequestContext,
-        text: str,
-        policy_entity: Any = None,
-    ) -> PiiTransformResult:
-        policy = await self._policy_service.resolve_pii_policy(session, policy_entity, context)
-        return self._transform_text(text=text, policy=policy, sink="traces")
+    async def transform_log_text_if_needed(self, *, session: AsyncSession, context: RequestContext, text: str, policy_entity: Any = None) -> PiiTransformResult:
+        return await self._resolve_and_transform(session=session, context=context, text=text, policy_entity=policy_entity, sink="logs")
 
-    async def transform_agent_input_if_needed(
-        self,
-        *,
-        session: AsyncSession,
-        context: RequestContext,
-        input_obj: dict[str, Any],
-        policy: PiiPolicy | None,
-    ) -> dict[str, Any]:
+    async def transform_trace_text_if_needed(self, *, session: AsyncSession, context: RequestContext, text: str, policy_entity: Any = None) -> PiiTransformResult:
+        return await self._resolve_and_transform(session=session, context=context, text=text, policy_entity=policy_entity, sink="traces")
+
+    async def transform_agent_input_if_needed(self, *, session: AsyncSession, context: RequestContext, input_obj: dict[str, Any], policy: PiiPolicy | None) -> dict[str, Any]:
         return self._transform_object(input_obj, policy=policy, sink="input")
 
-    async def transform_agent_output_if_needed(
-        self,
-        *,
-        session: AsyncSession,
-        context: RequestContext,
-        output_obj: dict[str, Any],
-        policy: PiiPolicy | None,
-    ) -> dict[str, Any]:
+    async def transform_agent_output_if_needed(self, *, session: AsyncSession, context: RequestContext, output_obj: dict[str, Any], policy: PiiPolicy | None) -> dict[str, Any]:
         return self._transform_object(output_obj, policy=policy, sink="output")
 
     def _transform_object(self, value: Any, *, policy: PiiPolicy | None, sink: str) -> Any:
@@ -132,11 +82,7 @@ class PiiService:
             return self._raw_result(text=text, mode=PiiMode.off)
 
         if effective_policy.mode == PiiMode.pseudonymize_rehydratable:
-            record_pii_transform_error(
-                mode=effective_policy.mode.value,
-                tenant_id=self._policy_tenant_id(effective_policy),
-            )
-            raise NotImplementedError("mode not implemented in baseline")
+            raise NotImplementedError("pseudonymize_rehydratable mode is not implemented")
 
         detections = self._detect_entities_batch([text], effective_policy)[0]
         if not self._should_transform(policy=effective_policy, sink=sink):

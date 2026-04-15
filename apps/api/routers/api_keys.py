@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from aura.domain.contracts import UserIdentity
 from aura.services.api_key_service import ApiKeyService
 
 router = APIRouter(prefix="/api/v1/admin/api-keys", tags=["api-keys"])
+service = ApiKeyService()
 
 
 class CreateApiKeyRequest(BaseModel):
@@ -41,8 +42,7 @@ async def create_api_key(
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
 ) -> CreateApiKeyResponse:
-    svc = ApiKeyService()
-    record, raw_key = await svc.create(
+    record, raw_key = await service.create(
         session,
         tenant_id=identity.tenant_id,
         user_id=identity.user_id,
@@ -67,8 +67,7 @@ async def list_api_keys(
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[ApiKeyResponse]:
-    svc = ApiKeyService()
-    keys = await svc.list_keys(session, identity.tenant_id)
+    keys = await service.list_keys(session, identity.tenant_id)
     return [
         ApiKeyResponse(
             id=k.id,
@@ -88,8 +87,8 @@ async def revoke_api_key(
     key_id: UUID,
     identity: UserIdentity = Depends(require_identity),
     session: AsyncSession = Depends(get_db_session),
-) -> None:
-    svc = ApiKeyService()
-    ok = await svc.revoke(session, key_id, identity.tenant_id)
+) -> Response:
+    ok = await service.revoke(session, key_id, identity.tenant_id)
     if not ok:
         raise HTTPException(status_code=404, detail="API key not found or already revoked")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

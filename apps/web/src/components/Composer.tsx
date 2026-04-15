@@ -101,7 +101,7 @@ export function Composer({ threadId, onNewThread }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fallbackSpaceIds = availableSpaces.slice(0, 1).map((s) => s.space_id);
+  const fallbackSpaceIds = availableSpaces.slice(0, 1).map((s) => s.id);
   const currentSpaceIds = threadId
     ? (activeSpaceIds[threadId] ?? fallbackSpaceIds)
     : (draftSpaceIds.length ? draftSpaceIds : fallbackSpaceIds);
@@ -157,7 +157,7 @@ export function Composer({ threadId, onNewThread }: Props) {
       }
     } else {
       const nextIds = Array.from(
-        new Set([...currentSpaceIds, (item as Space).space_id])
+        new Set([...currentSpaceIds, (item as Space).id])
       );
       if (threadId) {
         setActiveSpaceIds(threadId, nextIds);
@@ -295,11 +295,11 @@ export function Composer({ threadId, onNewThread }: Props) {
 
     if (!threadId) {
       upsertThread({
-        conversation_id: conversationId,
+        id: conversationId,
         title: trimmed.slice(0, 50),
-        last_message_at: new Date().toISOString(),
-        message_count: 1,
-        active_space_ids: currentSpaceIds,
+        space_ids: currentSpaceIds,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
       setActiveSpaceIds(conversationId, currentSpaceIds);
       setActiveAgentIds(conversationId, currentAgentIds);
@@ -420,13 +420,13 @@ export function Composer({ threadId, onNewThread }: Props) {
             const isAgent = mention.type === "agent";
             const key = isAgent
               ? (item as AgentSummary).agent_id
-              : (item as Space).space_id;
+              : (item as Space).id;
             const name = isAgent
               ? (item as AgentSummary).name
               : (item as Space).name;
             const sub = isAgent
               ? (item as AgentSummary).description
-              : (item as Space).description;
+              : (item as Space).slug;
             return (
               <button
                 key={key}

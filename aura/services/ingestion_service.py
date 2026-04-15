@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, NAMESPACE_URL, uuid5
 
+from redis.exceptions import LockNotOwnedError
 from redis.asyncio import from_url as redis_from_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,7 +138,10 @@ class IngestionService:
             raise
         finally:
             if acquired:
-                await lock.release()
+                try:
+                    await lock.release()
+                except LockNotOwnedError:
+                    pass
             await redis.aclose()
 
     async def _load_document_bundle(

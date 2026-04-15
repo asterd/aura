@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aura.adapters.langfuse.client import LangfuseClient, LangfuseUnavailableError
 from aura.adapters.db.models import KnowledgeSpace, ToneProfile
-from aura.domain.contracts import ChatRequest, RequestContext, RetrievalResult
+from aura.domain.contracts import ChatRequest, RetrievalResult
 from aura.utils.observability import get_current_trace_id
 
 
@@ -98,6 +98,5 @@ class PromptService:
             return ""
         return await self.resolve_optional_prompt("agent_prompt")
 
-    async def resolve_agent_prompt(self, *, session: AsyncSession, version, context: RequestContext) -> str:
-        del session, version, context
+    async def resolve_agent_prompt(self) -> str:
         return await self.resolve_optional_prompt("agent_prompt")

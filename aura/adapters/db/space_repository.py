@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -11,58 +10,40 @@ from aura.adapters.db.models import SpaceMembership
 from aura.domain.contracts import KnowledgeSpace
 
 
-@dataclass(slots=True)
-class SpaceCreateData:
-    tenant_id: UUID
-    name: str
-    slug: str
-    space_type: str
-    visibility: str
-    source_access_mode: str
-    embedding_profile_id: UUID
-    retrieval_profile_id: UUID
-    pii_policy_id: UUID | None = None
-    tone_profile_id: UUID | None = None
-    system_instructions: str | None = None
-
-
 def _to_contract(space: KnowledgeSpaceModel) -> KnowledgeSpace:
-    return KnowledgeSpace.model_validate(
-        {
-            "id": space.id,
-            "tenant_id": space.tenant_id,
-            "name": space.name,
-            "slug": space.slug,
-            "space_type": space.space_type,
-            "visibility": space.visibility,
-            "source_access_mode": space.source_access_mode,
-            "embedding_profile_id": space.embedding_profile_id,
-            "retrieval_profile_id": space.retrieval_profile_id,
-            "pii_policy_id": space.pii_policy_id,
-            "tone_profile_id": space.tone_profile_id,
-            "system_instructions": space.system_instructions,
-            "status": space.status,
-            "created_by": space.created_by,
-            "created_at": space.created_at,
-            "updated_at": space.updated_at,
-        }
-    )
+    return KnowledgeSpace.model_validate(space, from_attributes=True)
 
 
 class SpaceRepository:
-    async def create(self, session: AsyncSession, data: SpaceCreateData, created_by: UUID) -> KnowledgeSpace:
+    async def create(
+        self,
+        session: AsyncSession,
+        *,
+        tenant_id: UUID,
+        created_by: UUID,
+        name: str,
+        slug: str,
+        space_type: str,
+        visibility: str,
+        source_access_mode: str,
+        embedding_profile_id: UUID,
+        retrieval_profile_id: UUID,
+        pii_policy_id: UUID | None = None,
+        tone_profile_id: UUID | None = None,
+        system_instructions: str | None = None,
+    ) -> KnowledgeSpace:
         space = KnowledgeSpaceModel(
-            tenant_id=data.tenant_id,
-            name=data.name,
-            slug=data.slug,
-            space_type=data.space_type,
-            visibility=data.visibility,
-            source_access_mode=data.source_access_mode,
-            embedding_profile_id=data.embedding_profile_id,
-            retrieval_profile_id=data.retrieval_profile_id,
-            pii_policy_id=data.pii_policy_id,
-            tone_profile_id=data.tone_profile_id,
-            system_instructions=data.system_instructions,
+            tenant_id=tenant_id,
+            name=name,
+            slug=slug,
+            space_type=space_type,
+            visibility=visibility,
+            source_access_mode=source_access_mode,
+            embedding_profile_id=embedding_profile_id,
+            retrieval_profile_id=retrieval_profile_id,
+            pii_policy_id=pii_policy_id,
+            tone_profile_id=tone_profile_id,
+            system_instructions=system_instructions,
             created_by=created_by,
         )
         session.add(space)

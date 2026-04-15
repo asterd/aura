@@ -18,17 +18,17 @@ export interface ArtifactRef {
 }
 
 export interface ConversationSummary {
-  conversation_id: string;
+  id: string;
   title?: string;
-  last_message_at: string;
-  message_count: number;
-  active_space_ids: string[];
+  space_ids: string[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Space {
-  space_id: string;
+  id: string;
   name: string;
-  description?: string;
+  slug: string;
 }
 
 export interface AgentSummary {
@@ -61,6 +61,7 @@ export interface UserIdentity {
   email: string;
   tenant_id: string;
   roles: string[];
+  display_name?: string;
 }
 
 export interface MeResponse {

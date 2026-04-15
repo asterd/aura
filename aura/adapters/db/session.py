@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from apps.api.config import settings
 
 
+_UNSET_TENANT_ID = "00000000-0000-0000-0000-000000000000"
+
+
 engine = create_async_engine(
     settings.database_url,
     pool_pre_ping=True,
@@ -19,7 +22,7 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 @event.listens_for(engine.sync_engine, "connect")
 def on_connect(dbapi_conn, _) -> None:
     cursor = dbapi_conn.cursor()
-    cursor.execute("SET app.current_tenant_id = ''")
+    cursor.execute(f"SET app.current_tenant_id = '{_UNSET_TENANT_ID}'")
     cursor.close()
 
 

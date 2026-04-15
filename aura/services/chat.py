@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 import logging
 
 from fastapi import HTTPException, status
@@ -52,8 +53,27 @@ class ChatService:
         self._policies = policy_service or PolicyService()
 
     def _empty_retrieval_result(self, request: ChatRequest) -> RetrievalResult:
-        """Return an empty RetrievalResult for free-chat mode (no space_ids)."""
         return RetrievalResult(query=request.message)
+
+    async def resolve_retrieval_result(
+        self,
+        *,
+        session: AsyncSession,
+        request: ChatRequest,
+        context: RequestContext,
+    ) -> RetrievalResult:
+        if not request.space_ids:
+            return self._empty_retrieval_result(request)
+        return await self._retrieval.retrieve(
+            session=session,
+            request=RetrievalRequest(
+                query=request.message,
+                space_ids=request.space_ids,
+                conversation_id=request.conversation_id,
+                retrieval_profile_id=request.retrieval_profile_id,
+            ),
+            context=context,
+        )
 
     async def respond(
         self,
@@ -62,19 +82,11 @@ class ChatService:
         request: ChatRequest,
         context: RequestContext,
     ) -> ChatResponse:
-        if request.space_ids:
-            retrieval_result = await self._retrieval.retrieve(
-                session=session,
-                request=RetrievalRequest(
-                    query=request.message,
-                    space_ids=request.space_ids,
-                    conversation_id=request.conversation_id,
-                    retrieval_profile_id=request.retrieval_profile_id,
-                ),
-                context=context,
-            )
-        else:
-            retrieval_result = self._empty_retrieval_result(request)
+        retrieval_result = await self.resolve_retrieval_result(
+            session=session,
+            request=request,
+            context=context,
+        )
         return await self.respond_with_context(
             session=session,
             request=request,
@@ -89,19 +101,11 @@ class ChatService:
         request: ChatRequest,
         context: RequestContext,
     ) -> AsyncGenerator[ChatStreamEvent, None]:
-        if request.space_ids:
-            retrieval_result = await self._retrieval.retrieve(
-                session=session,
-                request=RetrievalRequest(
-                    query=request.message,
-                    space_ids=request.space_ids,
-                    conversation_id=request.conversation_id,
-                    retrieval_profile_id=request.retrieval_profile_id,
-                ),
-                context=context,
-            )
-        else:
-            retrieval_result = self._empty_retrieval_result(request)
+        retrieval_result = await self.resolve_retrieval_result(
+            session=session,
+            request=request,
+            context=context,
+        )
         async for event in self.respond_stream_with_context(
             session=session,
             request=request,
@@ -119,46 +123,26 @@ class ChatService:
         context: RequestContext,
         agent_runs: list[dict[str, str | AgentRunResult]] | None = None,
     ) -> ChatResponse:
-        spaces = await self._load_spaces(session, request.space_ids)
-        prompt = await self._prompt.build_prompt_stack(
+        prepared = await self._prepare_chat(
             session=session,
-            context=context,
             request=request,
             retrieval_result=retrieval_result,
-        )
-        model_policy = await self._policies.resolve_model_policy(session, spaces, context)
-        model_name = self._resolve_model_name(request=request, model_policy=model_policy)
-        input_transform = await self._pii.transform_input_if_needed(
-            session=session,
             context=context,
-            text=request.message,
-            policy_entity=spaces,
-        )
-        user_persisted_transform = await self._pii.transform_persisted_text_if_needed(
-            session=session,
-            context=context,
-            text=request.message,
-            policy_entity=spaces,
-        )
-        log_transform = await self._pii.transform_log_text_if_needed(
-            session=session,
-            context=context,
-            text=request.message,
-            policy_entity=spaces,
+            log_event_name="chat_request_received",
         )
         logger.log(
-            logging.WARNING if log_transform.had_transformations else logging.INFO,
+            logging.WARNING if prepared.log_transform.had_transformations else logging.INFO,
             "chat_request_received trace_id=%s tenant_id=%s content=%s",
             context.trace_id,
             context.tenant_id,
-            log_transform.transformed_text,
+            prepared.log_transform.transformed_text,
         )
         try:
             llm_result = await self._llm.generate(
                 session=session,
-                prompt=prompt,
-                transformed_user_text=input_transform.transformed_text,
-                model_override=model_name,
+                prompt=prepared.prompt,
+                transformed_user_text=prepared.input_transform.transformed_text,
+                model_override=prepared.model_name,
                 context=context,
                 space_ids=request.space_ids,
                 conversation_id=request.conversation_id,
@@ -172,20 +156,20 @@ class ChatService:
             session=session,
             context=context,
             text=llm_result.content,
-            policy_entity=spaces,
+            policy_entity=prepared.spaces,
         )
         assistant_persisted_transform = await self._pii.transform_persisted_text_if_needed(
             session=session,
             context=context,
             text=llm_result.content,
-            policy_entity=spaces,
+            policy_entity=prepared.spaces,
         )
         persisted = await self._conversations.persist_assistant_message(
             session=session,
             context=context,
             request=request,
             retrieval_result=retrieval_result,
-            persisted_user_text=user_persisted_transform.transformed_text,
+            persisted_user_text=prepared.user_persisted_transform.transformed_text,
             final_text=assistant_persisted_transform.transformed_text,
             model_used=llm_result.model_used,
             tokens_used=llm_result.tokens_used,
@@ -209,50 +193,29 @@ class ChatService:
         agent_runs: list[dict[str, str | AgentRunResult]] | None = None,
     ) -> AsyncGenerator[ChatStreamEvent, None]:
         try:
-            spaces = await self._load_spaces(session, request.space_ids)
-            prompt = await self._prompt.build_prompt_stack(
+            prepared = await self._prepare_chat(
                 session=session,
-                context=context,
                 request=request,
                 retrieval_result=retrieval_result,
-            )
-            model_policy = await self._policies.resolve_model_policy(session, spaces, context)
-            model_name = self._resolve_model_name(request=request, model_policy=model_policy)
-            input_transform = await self._pii.transform_input_if_needed(
-                session=session,
                 context=context,
-                text=request.message,
-                policy_entity=spaces,
-            )
-            user_persisted_transform = await self._pii.transform_persisted_text_if_needed(
-                session=session,
-                context=context,
-                text=request.message,
-                policy_entity=spaces,
-            )
-            log_transform = await self._pii.transform_log_text_if_needed(
-                session=session,
-                context=context,
-                text=request.message,
-                policy_entity=spaces,
+                log_event_name="chat_stream_received",
             )
             logger.log(
-                logging.WARNING if log_transform.had_transformations else logging.INFO,
+                logging.WARNING if prepared.log_transform.had_transformations else logging.INFO,
                 "chat_stream_received trace_id=%s tenant_id=%s content=%s",
                 context.trace_id,
                 context.tenant_id,
-                log_transform.transformed_text,
+                prepared.log_transform.transformed_text,
             )
             raw_chunks: list[str] = []
-            emitted_chunks: list[str] = []
             boundary_buffer = ""
 
             try:
                 async for token in self._llm.stream_generate(
                     session=session,
-                    prompt=prompt,
-                    transformed_user_text=input_transform.transformed_text,
-                    model_override=model_name,
+                    prompt=prepared.prompt,
+                    transformed_user_text=prepared.input_transform.transformed_text,
+                    model_override=prepared.model_name,
                     context=context,
                     space_ids=request.space_ids,
                     conversation_id=request.conversation_id,
@@ -266,9 +229,8 @@ class ChatService:
                         session=session,
                         context=context,
                         text=flushable,
-                        policy_entity=spaces,
+                        policy_entity=prepared.spaces,
                     )
-                    emitted_chunks.append(cleaned.transformed_text)
                     yield ChatStreamEventToken(type="token", content=cleaned.transformed_text)
             except LiteLLMUnavailableError as exc:
                 raise HTTPException(
@@ -281,9 +243,8 @@ class ChatService:
                     session=session,
                     context=context,
                     text=boundary_buffer,
-                    policy_entity=spaces,
+                    policy_entity=prepared.spaces,
                 )
-                emitted_chunks.append(cleaned_tail.transformed_text)
                 yield ChatStreamEventToken(type="token", content=cleaned_tail.transformed_text)
 
             for citation in retrieval_result.citations:
@@ -293,14 +254,14 @@ class ChatService:
                 session=session,
                 context=context,
                 text="".join(raw_chunks).strip(),
-                policy_entity=spaces,
+                policy_entity=prepared.spaces,
             )
             persisted = await self._conversations.persist_assistant_message(
                 session=session,
                 context=context,
                 request=request,
                 retrieval_result=retrieval_result,
-                persisted_user_text=user_persisted_transform.transformed_text,
+                persisted_user_text=prepared.user_persisted_transform.transformed_text,
                 final_text=assistant_persisted_transform.transformed_text,
                 model_used=None,
                 tokens_used=None,
@@ -335,3 +296,60 @@ class ChatService:
             return "", text
         split_at = last_boundary + 1
         return text[:split_at], text[split_at:]
+
+    async def _prepare_chat(
+        self,
+        *,
+        session: AsyncSession,
+        request: ChatRequest,
+        retrieval_result: RetrievalResult,
+        context: RequestContext,
+        log_event_name: str,
+    ):
+        spaces = await self._load_spaces(session, request.space_ids)
+        prompt = await self._prompt.build_prompt_stack(
+            session=session,
+            context=context,
+            request=request,
+            retrieval_result=retrieval_result,
+        )
+        model_policy = await self._policies.resolve_model_policy(session, spaces, context)
+        model_name = self._resolve_model_name(request=request, model_policy=model_policy)
+        input_transform = await self._pii.transform_input_if_needed(
+            session=session,
+            context=context,
+            text=request.message,
+            policy_entity=spaces,
+        )
+        user_persisted_transform = await self._pii.transform_persisted_text_if_needed(
+            session=session,
+            context=context,
+            text=request.message,
+            policy_entity=spaces,
+        )
+        log_transform = await self._pii.transform_log_text_if_needed(
+            session=session,
+            context=context,
+            text=request.message,
+            policy_entity=spaces,
+        )
+        return _PreparedChatContext(
+            log_event_name=log_event_name,
+            spaces=spaces,
+            prompt=prompt,
+            model_name=model_name,
+            input_transform=input_transform,
+            user_persisted_transform=user_persisted_transform,
+            log_transform=log_transform,
+        )
+
+
+@dataclass(slots=True)
+class _PreparedChatContext:
+    log_event_name: str
+    spaces: list[KnowledgeSpace]
+    prompt: list[dict[str, str]]
+    model_name: str
+    input_transform: object
+    user_persisted_transform: object
+    log_transform: object

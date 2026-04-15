@@ -8,7 +8,7 @@ from typing import Any, Callable, Literal
 from uuid import UUID
 from uuid import uuid4
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserIdentity(BaseModel):
@@ -225,6 +225,8 @@ class SandboxPolicy(BaseModel):
 
 
 class KnowledgeSpace(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     tenant_id: UUID
     name: str

@@ -10,14 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
-from apps.api.dependencies.services import get_agent_chat_service, get_chat_service, get_conversation_service, get_retrieval_service, get_policy_service
+from apps.api.dependencies.services import (
+    agent_chat_service,
+    chat_service,
+    conversation_service,
+    retrieval_service,
+    policy_service,
+)
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.contracts import ChatRequest, ChatResponse, RequestContext, RetrievalRequest, RetrievalResult
-from aura.services.agent_chat_service import AgentChatService
-from aura.services.chat import ChatService
-from aura.services.conversation_service import ConversationService
-from aura.services.policy_service import PolicyService
-from aura.services.retrieval import RetrievalService
 
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
@@ -32,9 +33,7 @@ class AvailableModelsResponse(BaseModel):
 async def get_available_models(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    policy_service: PolicyService = Depends(get_policy_service),
 ) -> AvailableModelsResponse:
-    """Restituisce i modelli disponibili per l'utente corrente secondo la ModelPolicy attiva."""
     policy = await policy_service.resolve_model_policy(session=session, entity=None, context=context)
     return AvailableModelsResponse(
         default_model=policy.default_model,
@@ -58,24 +57,15 @@ class RetrieveApiResponse(BaseModel):
     trace_id: str
 
 
-class RespondApiRequest(ChatRequest):
-    stream: bool = False
-
-
-class StreamApiRequest(ChatRequest):
-    stream: bool = True
-
-
 @router.post("/retrieve", response_model=RetrieveApiResponse)
 async def retrieve(
-    payload: RetrieveApiRequest,
+    payload: RetrievalRequest,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    retrieval_service: RetrievalService = Depends(get_retrieval_service),
 ) -> RetrieveApiResponse:
     result = await retrieval_service.retrieve(
         session=session,
-        request=RetrievalRequest(**payload.model_dump()),
+        request=payload,
         context=context,
     )
     return RetrieveApiResponse(result=result, trace_id=context.trace_id)
@@ -83,53 +73,45 @@ async def retrieve(
 
 @router.post("/respond", response_model=ChatResponse)
 async def respond(
-    payload: RespondApiRequest,
+    payload: ChatRequest,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    chat_service: ChatService = Depends(get_chat_service),
-    agent_chat_service: AgentChatService = Depends(get_agent_chat_service),
-    conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> ChatResponse:
-    request = ChatRequest(**payload.model_dump())
-    if _should_invoke_agent_flow(request):
+    if _should_invoke_agent_flow(payload):
         history = await conversation_service.get_history(
             session=session,
             context=context,
-            conversation_id=request.conversation_id,
+            conversation_id=payload.conversation_id,
         )
-        return await agent_chat_service.respond(session=session, ctx=context, request=request, history=history)
-    return await chat_service.respond(session=session, request=request, context=context)
+        return await agent_chat_service.respond(session=session, ctx=context, request=payload, history=history)
+    return await chat_service.respond(session=session, request=payload, context=context)
 
 
 @router.post("/stream")
 async def stream(
-    payload: StreamApiRequest,
+    payload: ChatRequest,
     context: RequestContext = Depends(get_request_context),
-    chat_service: ChatService = Depends(get_chat_service),
-    agent_chat_service: AgentChatService = Depends(get_agent_chat_service),
-    conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> StreamingResponse:
     async def event_source():
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 await set_tenant_rls(session, context.tenant_id)
-                request = ChatRequest(**payload.model_dump())
-                if _should_invoke_agent_flow(request):
+                if _should_invoke_agent_flow(payload):
                     history = await conversation_service.get_history(
                         session=session,
                         context=context,
-                        conversation_id=request.conversation_id,
+                        conversation_id=payload.conversation_id,
                     )
                     event_iter = agent_chat_service.respond_stream(
                         session=session,
                         ctx=context,
-                        request=request,
+                        request=payload,
                         history=history,
                     )
                 else:
                     event_iter = chat_service.respond_stream(
                         session=session,
-                        request=request,
+                        request=payload,
                         context=context,
                     )
                 async for event in event_iter:

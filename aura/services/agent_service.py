@@ -40,8 +40,7 @@ class _AgentKnowledgeService:
         self._session = session
         self._context = context
 
-    async def search(self, *, query: str, space_id: UUID, identity) -> _KnowledgeSearchResult:
-        del identity
+    async def search(self, *, query: str, space_id: UUID) -> _KnowledgeSearchResult:
         result = await self._retrieval.retrieve(
             session=self._session,
             request=RetrievalRequest(query=query, space_ids=[space_id]),
@@ -112,11 +111,11 @@ class AgentService:
         if version.status != "published":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only published agents are executable.")
 
-        await self._authz.ensure_can_run_agent(session=session, identity=context.identity, agent_version=version)
+        await self._authz.ensure_can_run_agent(identity=context.identity, agent_version=version)
 
         model_policy = await self._policies.resolve_model_policy(session, version, context)
         pii_policy = await self._policies.resolve_pii_policy(session, version, context)
-        system_prompt = await self._prompt.resolve_agent_prompt(session=session, version=version, context=context)
+        system_prompt = await self._prompt.resolve_agent_prompt()
         runtime = await self._providers.resolve_model(
             session=session,
             tenant_id=context.tenant_id,
@@ -155,8 +154,7 @@ class AgentService:
             mcp_adapters=mcp_adapters,
         )
 
-        artifact_ref = await self._registry.get_runtime_artifact_ref(session, version)
-        build_fn = await self._loader.load_build_fn(artifact_ref, version.entrypoint, version.artifact_sha256)
+        build_fn = await self._loader.load_build_fn(version.artifact_ref, version.entrypoint, version.artifact_sha256)
         temp_dir = getattr(build_fn, "__aura_temp_dir__", None)
         try:
             transformed_input = await self._pii.transform_agent_input_if_needed(
@@ -202,7 +200,7 @@ class AgentService:
                 output_tokens=max(0, len(str(transformed_output).split())),
                 estimated_cost_usd=0,
             )
-            await self._audit.emit_agent_run(session=session, context=context, run_id=persisted.id)
+            await self._audit.emit_agent_run(context=context, run_id=persisted.id)
             output_text = transformed_output if isinstance(transformed_output, str) else transformed_output.get("result")
             output_data = transformed_output if isinstance(transformed_output, dict) else None
             return AgentRunResult(
@@ -245,7 +243,7 @@ class AgentService:
                 output_tokens=0,
                 estimated_cost_usd=0,
             )
-            await self._audit.emit_agent_run(session=session, context=context, run_id=persisted.id)
+            await self._audit.emit_agent_run(context=context, run_id=persisted.id)
             logger.exception("agent_run_failed agent=%s version=%s trace_id=%s", version.name, version.version, context.trace_id)
             return AgentRunResult(
                 run_id=persisted.id,

@@ -22,26 +22,12 @@ import type {
 
 const BASE = "/api/v1";
 
-type ApiSpace = {
-  id: string;
-  name: string;
-  slug: string;
-};
-
 type ApiAgentSummary = {
   agent_id: string;
   name: string;
   slug: string;
   description?: string;
   status: string;
-};
-
-type ApiConversationSummary = {
-  id: string;
-  title?: string;
-  space_ids: string[];
-  created_at: string;
-  updated_at: string;
 };
 
 function authHeaders(): HeadersInit {
@@ -140,12 +126,7 @@ export async function updateLocalUser(id: string, payload: Record<string, unknow
 
 // ─── Spaces ────────────────────────────────────────────────────────────────
 export async function getSpaces(): Promise<Space[]> {
-  const spaces = await apiFetch<ApiSpace[]>("/spaces");
-  return spaces.map((space) => ({
-    space_id: space.id,
-    name: space.name,
-    description: space.slug,
-  }));
+  return apiFetch<Space[]>("/spaces");
 }
 
 // ─── Agents ────────────────────────────────────────────────────────────────
@@ -212,15 +193,9 @@ export interface ConversationsPage {
 
 export async function getConversations(cursor?: string): Promise<ConversationsPage> {
   const q = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-  const items = await apiFetch<ApiConversationSummary[]>(`/conversations${q}`);
+  const items = await apiFetch<ConversationSummary[]>(`/conversations${q}`);
   return {
-    items: items.map((item) => ({
-      conversation_id: item.id,
-      title: item.title,
-      last_message_at: item.updated_at,
-      message_count: 0,
-      active_space_ids: item.space_ids,
-    })),
+    items,
     next_cursor: null,
   };
 }
@@ -257,37 +232,36 @@ export interface UploadProgress {
   total: number;
 }
 
+function uploadWithProgress<T>(
+  url: string,
+  formData: FormData,
+  onProgress?: (p: UploadProgress) => void
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress({ loaded: e.loaded, total: e.total });
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText) as T);
+      else reject(new Error(`Upload failed: ${xhr.status} — ${xhr.responseText}`));
+    };
+    xhr.onerror = () => reject(new Error("Upload network error"));
+    xhr.send(formData);
+  });
+}
+
 export function uploadFile(
   spaceId: string,
   file: File,
   onProgress?: (p: UploadProgress) => void
 ): Promise<{ document_id: string }> {
-  return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    formData.append("space_id", spaceId);
-    formData.append("file", file);
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${BASE}/datasources/upload`);
-    xhr.withCredentials = true;
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        onProgress({ loaded: e.loaded, total: e.total });
-      }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText));
-      } else {
-        reject(new Error(`Upload failed: ${xhr.status}`));
-      }
-    };
-
-    xhr.onerror = () => reject(new Error("Upload network error"));
-    xhr.send(formData);
-  });
+  const formData = new FormData();
+  formData.append("space_id", spaceId);
+  formData.append("file", file);
+  return uploadWithProgress<{ document_id: string }>(`${BASE}/datasources/upload`, formData, onProgress);
 }
 
 // ─── Artifact signed URL ───────────────────────────────────────────────────
@@ -309,33 +283,12 @@ export async function publishAgent(agentVersionId: string): Promise<AgentVersion
 export function uploadAgent(
   manifestYaml: string,
   zipFile: File,
-  onProgress?: (p: { loaded: number; total: number }) => void
+  onProgress?: (p: UploadProgress) => void
 ): Promise<AgentVersion> {
-  return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    formData.append("manifest", manifestYaml);
-    formData.append("artifact", zipFile);
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/v1/admin/agents/upload`);
-    xhr.withCredentials = true;
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        onProgress({ loaded: e.loaded, total: e.total });
-      }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText) as AgentVersion);
-      } else {
-        reject(new Error(`Upload failed: ${xhr.status} — ${xhr.responseText}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error("Network error during agent upload"));
-    xhr.send(formData);
-  });
+  const formData = new FormData();
+  formData.append("manifest", manifestYaml);
+  formData.append("artifact", zipFile);
+  return uploadWithProgress<AgentVersion>(`/api/v1/admin/agents/upload`, formData, onProgress);
 }
 
 // ─── Chat models ───────────────────────────────────────────────────────────

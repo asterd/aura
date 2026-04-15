@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -9,43 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aura.adapters.db.models import EmbeddingProfile, RetrievalProfile, ToneProfile, User
-from aura.adapters.db.space_repository import SpaceCreateData, SpaceRepository
+from aura.adapters.db.space_repository import SpaceRepository
 from aura.domain.contracts import KnowledgeSpace, UserIdentity
 
 
 _ROLE_ORDER = {"reader": 1, "editor": 2, "admin": 3}
-
-
-@dataclass(slots=True)
-class CreateSpaceInput:
-    name: str
-    slug: str
-    space_type: str
-    visibility: str
-    source_access_mode: str
-    embedding_profile_id: UUID | None = None
-    retrieval_profile_id: UUID | None = None
-    pii_policy_id: UUID | None = None
-    tone_profile_id: UUID | None = None
-    system_instructions: str | None = None
-
-
-@dataclass(slots=True)
-class UpdateSpaceInput:
-    name: str | None = None
-    slug: str | None = None
-    visibility: str | None = None
-    source_access_mode: str | None = None
-    embedding_profile_id: UUID | None = None
-    retrieval_profile_id: UUID | None = None
-    tone_profile_id: UUID | None = None
-    system_instructions: str | None = None
-
-
-@dataclass(slots=True)
-class AddMemberInput:
-    user_id: UUID
-    role: str
 
 
 def _forbidden(detail: str = "Forbidden.") -> HTTPException:
@@ -56,29 +23,42 @@ class SpaceService:
     def __init__(self, repository: SpaceRepository | None = None) -> None:
         self._repository = repository or SpaceRepository()
 
-    async def create_space(self, session: AsyncSession, identity: UserIdentity, data: CreateSpaceInput) -> KnowledgeSpace:
+    async def create_space(
+        self,
+        session: AsyncSession,
+        identity: UserIdentity,
+        *,
+        name: str,
+        slug: str,
+        space_type: str,
+        visibility: str,
+        source_access_mode: str,
+        embedding_profile_id: UUID | None = None,
+        retrieval_profile_id: UUID | None = None,
+        pii_policy_id: UUID | None = None,
+        tone_profile_id: UUID | None = None,
+        system_instructions: str | None = None,
+    ) -> KnowledgeSpace:
         await self._ensure_user_exists(session, identity.user_id)
-        embedding_profile_id = await self._resolve_embedding_profile_id(session, identity.tenant_id, data.embedding_profile_id)
-        retrieval_profile_id = await self._resolve_retrieval_profile_id(session, identity.tenant_id, data.retrieval_profile_id)
-        tone_profile_id = await self._resolve_tone_profile_id(session, identity.tenant_id, data.tone_profile_id)
+        embedding_profile_id = await self._resolve_embedding_profile_id(session, identity.tenant_id, embedding_profile_id)
+        retrieval_profile_id = await self._resolve_retrieval_profile_id(session, identity.tenant_id, retrieval_profile_id)
+        tone_profile_id = await self._resolve_tone_profile_id(session, identity.tenant_id, tone_profile_id)
 
         try:
             space = await self._repository.create(
                 session,
-                SpaceCreateData(
-                    tenant_id=identity.tenant_id,
-                    name=data.name,
-                    slug=data.slug,
-                    space_type=data.space_type,
-                    visibility=data.visibility,
-                    source_access_mode=data.source_access_mode,
-                    embedding_profile_id=embedding_profile_id,
-                    retrieval_profile_id=retrieval_profile_id,
-                    pii_policy_id=data.pii_policy_id,
-                    tone_profile_id=tone_profile_id,
-                    system_instructions=data.system_instructions,
-                ),
                 created_by=identity.user_id,
+                tenant_id=identity.tenant_id,
+                name=name,
+                slug=slug,
+                space_type=space_type,
+                visibility=visibility,
+                source_access_mode=source_access_mode,
+                embedding_profile_id=embedding_profile_id,
+                retrieval_profile_id=retrieval_profile_id,
+                pii_policy_id=pii_policy_id,
+                tone_profile_id=tone_profile_id,
+                system_instructions=system_instructions,
             )
         except IntegrityError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Space already exists.") from exc
@@ -107,27 +87,40 @@ class SpaceService:
         session: AsyncSession,
         identity: UserIdentity,
         space_id: UUID,
-        data: UpdateSpaceInput,
+        *,
+        name: str | None = None,
+        slug: str | None = None,
+        visibility: str | None = None,
+        source_access_mode: str | None = None,
+        embedding_profile_id: UUID | None = None,
+        retrieval_profile_id: UUID | None = None,
+        tone_profile_id: UUID | None = None,
+        system_instructions: str | None = None,
     ) -> KnowledgeSpace:
         space = await self._authorize_write(session, identity, space_id, minimum_role="editor")
         updates: dict[str, object] = {}
 
-        for field_name in ("name", "slug", "visibility", "source_access_mode", "system_instructions"):
-            value = getattr(data, field_name)
+        for field_name, value in (
+            ("name", name),
+            ("slug", slug),
+            ("visibility", visibility),
+            ("source_access_mode", source_access_mode),
+            ("system_instructions", system_instructions),
+        ):
             if value is not None:
                 updates[field_name] = value
 
-        if data.embedding_profile_id is not None:
+        if embedding_profile_id is not None:
             updates["embedding_profile_id"] = await self._resolve_embedding_profile_id(
-                session, identity.tenant_id, data.embedding_profile_id
+                session, identity.tenant_id, embedding_profile_id
             )
-        if data.retrieval_profile_id is not None:
+        if retrieval_profile_id is not None:
             updates["retrieval_profile_id"] = await self._resolve_retrieval_profile_id(
-                session, identity.tenant_id, data.retrieval_profile_id
+                session, identity.tenant_id, retrieval_profile_id
             )
-        if data.tone_profile_id is not None:
+        if tone_profile_id is not None:
             updates["tone_profile_id"] = await self._resolve_tone_profile_id(
-                session, identity.tenant_id, data.tone_profile_id
+                session, identity.tenant_id, tone_profile_id
             )
 
         updated = await self._repository.update(session, space.id, updates)
@@ -147,11 +140,13 @@ class SpaceService:
         session: AsyncSession,
         identity: UserIdentity,
         space_id: UUID,
-        data: AddMemberInput,
+        *,
+        user_id: UUID,
+        role: str,
     ) -> KnowledgeSpace:
         await self._authorize_write(session, identity, space_id, minimum_role="admin")
-        await self._ensure_user_exists(session, data.user_id)
-        await self._repository.add_member(session, space_id, data.user_id, data.role)
+        await self._ensure_user_exists(session, user_id)
+        await self._repository.add_member(session, space_id, user_id, role)
         return await self.get_space(session, identity, space_id)
 
     async def _load_space(self, session: AsyncSession, space_id: UUID) -> KnowledgeSpace:
@@ -180,38 +175,23 @@ class SpaceService:
         role = await self._repository.get_membership_role(session, space.id, user_id)
         return role is not None
 
-    async def _resolve_embedding_profile_id(
-        self, session: AsyncSession, tenant_id: UUID, profile_id: UUID | None
-    ) -> UUID:
-        statement = select(EmbeddingProfile.id).where(EmbeddingProfile.tenant_id == tenant_id)
-        if profile_id is None:
-            statement = statement.where(EmbeddingProfile.is_default.is_(True))
-        else:
-            statement = statement.where(EmbeddingProfile.id == profile_id)
+    async def _resolve_required_profile_id(self, session: AsyncSession, model_class, tenant_id: UUID, profile_id: UUID | None, label: str) -> UUID:
+        statement = select(model_class.id).where(model_class.tenant_id == tenant_id)
+        statement = statement.where(model_class.id == profile_id) if profile_id is not None else statement.where(model_class.is_default.is_(True))
         resolved = (await session.execute(statement)).scalar_one_or_none()
         if resolved is None:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid embedding profile.")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid {label}.")
         return resolved
 
-    async def _resolve_retrieval_profile_id(
-        self, session: AsyncSession, tenant_id: UUID, profile_id: UUID | None
-    ) -> UUID:
-        statement = select(RetrievalProfile.id).where(RetrievalProfile.tenant_id == tenant_id)
-        if profile_id is None:
-            statement = statement.where(RetrievalProfile.is_default.is_(True))
-        else:
-            statement = statement.where(RetrievalProfile.id == profile_id)
-        resolved = (await session.execute(statement)).scalar_one_or_none()
-        if resolved is None:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid retrieval profile.")
-        return resolved
+    async def _resolve_embedding_profile_id(self, session: AsyncSession, tenant_id: UUID, profile_id: UUID | None) -> UUID:
+        return await self._resolve_required_profile_id(session, EmbeddingProfile, tenant_id, profile_id, "embedding profile")
+
+    async def _resolve_retrieval_profile_id(self, session: AsyncSession, tenant_id: UUID, profile_id: UUID | None) -> UUID:
+        return await self._resolve_required_profile_id(session, RetrievalProfile, tenant_id, profile_id, "retrieval profile")
 
     async def _resolve_tone_profile_id(self, session: AsyncSession, tenant_id: UUID, profile_id: UUID | None) -> UUID | None:
         statement = select(ToneProfile.id).where(ToneProfile.tenant_id == tenant_id)
-        if profile_id is not None:
-            statement = statement.where(ToneProfile.id == profile_id)
-        else:
-            statement = statement.where(ToneProfile.name == "default")
+        statement = statement.where(ToneProfile.id == profile_id) if profile_id is not None else statement.where(ToneProfile.name == "default")
         return (await session.execute(statement)).scalar_one_or_none()
 
     async def _ensure_user_exists(self, session: AsyncSession, user_id: UUID) -> None:

@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from apps.api.config import settings
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.adapters.db.models import AgentTriggerRegistration
 from aura.domain.contracts import AgentRunRequest, InternalEvent, RequestContext, UserIdentity
@@ -12,6 +14,14 @@ from aura.services.agent_service import AgentService
 from aura.services.registry_service import RegistryService
 from aura.services.trigger_scheduler_service import TriggerSchedulerService
 from aura.utils.observability import record_job_failure, record_job_success, record_trace_event
+
+
+owner_engine = create_async_engine(
+    settings.migration_database_url,
+    pool_pre_ping=True,
+    connect_args={"timeout": settings.postgres_connect_timeout_s},
+)
+OwnerSessionLocal = async_sessionmaker(owner_engine, expire_on_commit=False)
 
 
 async def agent_run_job(
@@ -47,11 +57,20 @@ async def agent_run_job(
 async def dispatch_registered_crons_job(ctx: dict) -> None:
     del ctx
     scheduler = TriggerSchedulerService()
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            tenant_rows = await session.execute(select(AgentTriggerRegistration.tenant_id).distinct())
-            tenants = list(tenant_rows.scalars())
-            for tenant_id in tenants:
+    async with OwnerSessionLocal() as owner_session:
+        tenant_rows = await owner_session.execute(
+            select(AgentTriggerRegistration.tenant_id)
+            .where(
+                AgentTriggerRegistration.trigger_type == "cron",
+                AgentTriggerRegistration.status == "active",
+            )
+            .distinct()
+        )
+        tenants = list(tenant_rows.scalars())
+
+    for tenant_id in tenants:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
                 await set_tenant_rls(session, tenant_id)
                 await scheduler.run_due_cron_triggers(session, tenant_id, now=datetime.now(UTC))
 

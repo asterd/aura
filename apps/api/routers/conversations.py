@@ -12,12 +12,11 @@ from aura.adapters.db.models import AgentRun
 from aura.adapters.db.models import Document
 from apps.api.dependencies.auth import get_request_context
 from apps.api.dependencies.db import get_db_session
-from apps.api.dependencies.services import get_conversation_service
+from apps.api.dependencies.services import conversation_service
 from aura.adapters.db.models import Message
 from aura.adapters.db.models import MessageAgentRun
 from aura.adapters.db.models import MessageCitation
 from aura.domain.contracts import RequestContext
-from aura.services.conversation_service import ConversationService
 
 
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
@@ -101,23 +100,75 @@ def _artifact_label_from_ref(ref: str) -> str:
     return ref.rsplit("/", 1)[-1] or ref
 
 
+def _to_conversation_summary(conversation) -> ConversationSummary:
+    return ConversationSummary(
+        id=conversation.id,
+        title=conversation.title,
+        space_ids=conversation.space_ids,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+    )
+
+
+def _to_conversation_message(message) -> ConversationMessage:
+    return ConversationMessage(
+        id=message.id,
+        role=message.role,
+        content=message.content,
+        trace_id=message.trace_id,
+        created_at=message.created_at,
+    )
+
+
+def _to_citation_response(citation_row, document: Document) -> CitationResponse:
+    return CitationResponse(
+        citation_id=citation_row.citation_id,
+        document_id=citation_row.document_id,
+        title=document.title,
+        source_system="document",
+        source_path=document.source_path,
+        source_url=document.source_url,
+        page_or_section=None,
+        score=citation_row.score,
+        snippet=citation_row.snippet,
+    )
+
+
+def _to_artifact_response(ref: str, created_at: datetime) -> ArtifactRefResponse:
+    return ArtifactRefResponse(
+        artifact_id=ref,
+        artifact_type=_artifact_type_from_ref(ref),
+        label=_artifact_label_from_ref(ref),
+        created_at=created_at,
+    )
+
+
+def _to_message_list_item(
+    message: Message,
+    citations: list[CitationResponse],
+    artifacts: list[ArtifactRefResponse],
+) -> MessageListItem:
+    return MessageListItem(
+        message_id=message.id,
+        conversation_id=message.conversation_id,
+        role="assistant" if message.role == "system" else message.role,
+        content=message.content,
+        status="DONE",
+        citations=citations,
+        artifacts=artifacts,
+        error=None,
+        trace_id=message.trace_id,
+        created_at=message.created_at,
+    )
+
+
 @router.get("", response_model=list[ConversationSummary])
 async def list_conversations(
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> list[ConversationSummary]:
     conversations = await conversation_service.list_conversations(session=session, context=context)
-    return [
-        ConversationSummary(
-            id=conversation.id,
-            title=conversation.title,
-            space_ids=conversation.space_ids,
-            created_at=conversation.created_at,
-            updated_at=conversation.updated_at,
-        )
-        for conversation in conversations
-    ]
+    return [_to_conversation_summary(conversation) for conversation in conversations]
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetail)
@@ -125,7 +176,6 @@ async def get_conversation(
     conversation_id: UUID,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> ConversationDetail:
     conversation = await conversation_service.get_conversation(session=session, context=context, conversation_id=conversation_id)
     if conversation is None:
@@ -139,16 +189,7 @@ async def get_conversation(
         space_ids=conversation.space_ids,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
-        messages=[
-            ConversationMessage(
-                id=message.id,
-                role=message.role,
-                content=message.content,
-                trace_id=message.trace_id,
-                created_at=message.created_at,
-            )
-            for message in messages
-        ],
+        messages=[_to_conversation_message(message) for message in messages],
     )
 
 
@@ -157,7 +198,6 @@ async def get_messages(
     conversation_id: UUID,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> MessagePageResponse:
     conversation = await conversation_service.get_conversation(
         session=session,
@@ -185,19 +225,7 @@ async def get_messages(
             )
         ).all()
         for citation_row, document in citation_rows:
-            citations_by_message.setdefault(citation_row.message_id, []).append(
-                CitationResponse(
-                    citation_id=citation_row.citation_id,
-                    document_id=citation_row.document_id,
-                    title=document.title,
-                    source_system="document",
-                    source_path=document.source_path,
-                    source_url=document.source_url,
-                    page_or_section=None,
-                    score=citation_row.score,
-                    snippet=citation_row.snippet,
-                )
-            )
+            citations_by_message.setdefault(citation_row.message_id, []).append(_to_citation_response(citation_row, document))
 
         artifact_rows = (
             await session.execute(
@@ -211,31 +239,10 @@ async def get_messages(
             refs = list(agent_run.artifact_refs or [])
             items = artifacts_by_message.setdefault(message_agent_run.message_id, [])
             for ref in refs:
-                items.append(
-                    ArtifactRefResponse(
-                        artifact_id=ref,
-                        artifact_type=_artifact_type_from_ref(ref),
-                        label=_artifact_label_from_ref(ref),
-                        created_at=agent_run.completed_at or agent_run.started_at,
-                    )
-                )
+                items.append(_to_artifact_response(ref, agent_run.completed_at or agent_run.started_at))
 
     return MessagePageResponse(
-        items=[
-            MessageListItem(
-                message_id=message.id,
-                conversation_id=message.conversation_id,
-                role="assistant" if message.role == "system" else message.role,
-                content=message.content,
-                status="DONE",
-                citations=citations_by_message.get(message.id, []),
-                artifacts=artifacts_by_message.get(message.id, []),
-                error=None,
-                trace_id=message.trace_id,
-                created_at=message.created_at,
-            )
-            for message in messages
-        ],
+        items=[_to_message_list_item(message, citations_by_message.get(message.id, []), artifacts_by_message.get(message.id, [])) for message in messages],
         next_cursor=None,
     )
 
@@ -245,7 +252,6 @@ async def delete_conversation(
     conversation_id: UUID,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db_session),
-    conversation_service: ConversationService = Depends(get_conversation_service),
 ) -> Response:
     deleted = await conversation_service.delete_conversation(
         session=session,

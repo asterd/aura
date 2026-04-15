@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { AdminConsole } from "@/components/AdminConsole";
+import { UserProfilePanel } from "@/components/UserProfilePanel";
 
 async function logout() {
   "use server";
@@ -65,6 +66,8 @@ export default async function SettingsPage() {
         >
           JWT tokens remain stored in a secure httpOnly cookie. Local-auth tenant bootstrap requires the configured bootstrap token.
         </div>
+
+        <UserProfilePanel />
 
         <AdminConsole />
       </div>
