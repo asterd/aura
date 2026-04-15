@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
+from typing import cast
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -60,7 +61,10 @@ class McpServerService:
         try:
             yield self._sse_event("endpoint", f"/mcp/v1/sse/messages/{session_id}")
             while await redis.exists(self._session_key(session_id)):
-                item: tuple[str, str] | None = await redis.blpop([self._queue_key(session_id)], timeout=1)
+                item = await cast(
+                    Awaitable[tuple[str, str] | None],
+                    redis.blpop([self._queue_key(session_id)], timeout=1),
+                )
                 if item is None:
                     yield ": keep-alive\n\n"
                     continue
@@ -110,7 +114,7 @@ class McpServerService:
         if request_id is not None:
             redis = self._redis()
             try:
-                await redis.rpush(self._queue_key(session_id), json.dumps(response))
+                await cast(Awaitable[int], redis.rpush(self._queue_key(session_id), json.dumps(response)))
                 await redis.expire(self._queue_key(session_id), 300)
             finally:
                 await redis.aclose()
