@@ -8,13 +8,14 @@ async function logout() {
   "use server";
   const cookieStore = await cookies();
   cookieStore.delete("aura_token");
-  redirect("/login");
+  cookieStore.delete("aura_tenant_slug");
+  redirect("/");
 }
 
 export default async function SettingsPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("aura_token");
-  if (!token?.value) redirect("/login");
+  if (!token?.value) redirect("/");
 
   return (
     <div className="h-full overflow-y-auto" style={{ backgroundColor: "var(--background)" }}>

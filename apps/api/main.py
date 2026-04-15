@@ -33,6 +33,7 @@ from apps.api.routers.mcp import router as mcp_router
 from apps.api.routers.spaces import router as spaces_router
 from apps.api.routers.skills import router as skills_router
 from apps.api.routers.tenants import router as tenants_router
+from apps.api.routers.tenants import public_router as public_tenants_router
 from apps.api.routers.webhooks import router as webhooks_router
 from apps.api.dependencies.services import sandbox_provider as _sandbox_provider
 from aura.adapters.db.session import AsyncSessionLocal
@@ -40,6 +41,7 @@ from aura.adapters.db.models import Group
 from aura.adapters.db.models import User as DbUser
 from aura.domain.contracts import RequestContext, UserIdentity
 from aura.domain.models import User
+from aura.services.bootstrap import ensure_default_tenant
 from aura.utils.observability import (
     get_gauge_value,
     init_otel,
@@ -76,6 +78,7 @@ app.include_router(llm_admin_router)
 app.include_router(webhooks_router)
 app.include_router(skills_router)
 app.include_router(tenants_router)
+app.include_router(public_tenants_router)
 app.include_router(mcp_router)
 
 init_otel("aura-api", settings.otlp_endpoint)
@@ -86,6 +89,11 @@ health_engine = create_async_engine(
     pool_pre_ping=True,
     poolclass=pool.NullPool,
 )
+
+
+@app.on_event("startup")
+async def bootstrap_default_tenant() -> None:
+    await ensure_default_tenant()
 
 
 @app.middleware("http")

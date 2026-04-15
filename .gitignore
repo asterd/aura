@@ -45,3 +45,6 @@ coverage.xml
 # IDE/editor local state
 .idea/
 .vscode/
+
+# Local corporate CA certificate
+nscacert.pem

@@ -12,13 +12,15 @@ export function middleware(request: NextRequest) {
 
   // Public paths that don't require auth
   const isLoginPage = pathname === "/login" || pathname.startsWith("/login");
+  const isTenantPublicPage = pathname === "/" || pathname.startsWith("/tenant/");
+  const isOidcPath = pathname.startsWith("/auth/oidc/");
   const isApiPath = pathname.startsWith("/api/");
   const isStaticPath =
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/favicon") ||
     pathname === "/robots.txt";
 
-  if (isStaticPath || isApiPath) {
+  if (isStaticPath || isApiPath || isOidcPath) {
     return NextResponse.next({
       request: {
         headers: requestHeaders,
@@ -26,16 +28,16 @@ export function middleware(request: NextRequest) {
     });
   }
 
-  // No token → redirect to login (except already on login)
+  // No token → allow public tenant selection and login routes, redirect all else to root
   if (!token) {
-    if (isLoginPage) return NextResponse.next();
+    if (isLoginPage || isTenantPublicPage) return NextResponse.next();
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    url.pathname = "/";
     return NextResponse.redirect(url);
   }
 
-  // Has token + on login → redirect to chat
-  if (token && isLoginPage) {
+  // Has token + on public auth routes → redirect to chat
+  if (token && (isLoginPage || isTenantPublicPage)) {
     const url = request.nextUrl.clone();
     url.pathname = "/chat";
     return NextResponse.redirect(url);

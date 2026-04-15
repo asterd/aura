@@ -405,7 +405,8 @@ export function AdminConsole() {
               okta_issuer: tenantForm.oktaIssuer || undefined,
               okta_audience: tenantForm.oktaAudience || undefined,
             };
-      const result = await provisionTenant(payload, tenantForm.bootstrapToken);
+      const canProvisionWithoutBootstrap = Boolean(me?.identity.roles?.includes("platform_admin"));
+      const result = await provisionTenant(payload, canProvisionWithoutBootstrap ? undefined : tenantForm.bootstrapToken);
       setNotice(`Tenant ${result.slug} created (${result.auth_mode}).`);
       setTenantForm((current) => ({
         ...current,
@@ -786,14 +787,16 @@ export function AdminConsole() {
           <div className="grid gap-6 lg:grid-cols-2">
             <SectionCard
               title="Tenant Provisioning"
-              description="Create local or Okta-backed tenants using the bootstrap token."
+              description="Create local or Okta-backed tenants directly from the admin console."
             >
               <form className="space-y-3" onSubmit={(event) => void submitTenantProvision(event)}>
-                <TextInput
-                  placeholder="Bootstrap token"
-                  value={tenantForm.bootstrapToken}
-                  onChange={(event) => setTenantForm({ ...tenantForm, bootstrapToken: event.target.value })}
-                />
+                {!me?.identity.roles?.includes("platform_admin") ? (
+                  <TextInput
+                    placeholder="Bootstrap token"
+                    value={tenantForm.bootstrapToken}
+                    onChange={(event) => setTenantForm({ ...tenantForm, bootstrapToken: event.target.value })}
+                  />
+                ) : null}
                 <div className="grid gap-3 md:grid-cols-2">
                   <TextInput
                     placeholder="Tenant slug"

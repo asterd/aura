@@ -82,6 +82,16 @@ export interface TenantAdminInfo {
   status: string;
 }
 
+export interface PublicTenantInfo {
+  tenant_id: string;
+  slug: string;
+  display_name: string;
+  auth_mode: string;
+  status: string;
+  supports_password_login: boolean;
+  okta_issuer?: string;
+}
+
 export interface LocalAdminUser {
   id: string;
   email: string;

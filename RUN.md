@@ -627,3 +627,10 @@ Se vuoi anche ispezionare la UI:
 
 6. avvia anche `apps/web`
 7. considera il frontend come shell in progresso, non come superficie totalmente validata end-to-end
+
+
+
+tenant: default
+display name: DEFAULT
+admin: admin@example.com
+password: change-me-now

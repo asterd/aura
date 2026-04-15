@@ -77,7 +77,7 @@ export async function localLogin(payload: {
 
 export async function provisionTenant(
   payload: Record<string, unknown>,
-  bootstrapToken: string
+  bootstrapToken?: string
 ): Promise<{
   tenant_id: string;
   slug: string;
@@ -90,7 +90,7 @@ export async function provisionTenant(
     body: JSON.stringify(payload),
     headers: {
       ...authHeaders(),
-      "X-Bootstrap-Token": bootstrapToken,
+      ...(bootstrapToken ? { "X-Bootstrap-Token": bootstrapToken } : {}),
     },
   });
 }

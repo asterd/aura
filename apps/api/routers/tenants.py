@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field, SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from aura.utils.passwords import hash_password
 
 
 router = APIRouter(prefix="/api/v1/admin/tenants", tags=["tenants"])
+public_router = APIRouter(prefix="/api/v1/public/tenants", tags=["tenants"])
 
 
 class ProvisionTenantRequest(BaseModel):
@@ -51,6 +52,16 @@ class TenantResponse(BaseModel):
     okta_issuer: str | None = None
     okta_audience: str | None = None
     status: str
+
+
+class PublicTenantResponse(BaseModel):
+    tenant_id: UUID
+    slug: str
+    display_name: str
+    auth_mode: str
+    status: str
+    supports_password_login: bool
+    okta_issuer: str | None = None
 
 
 class UpdateTenantAuthRequest(BaseModel):
@@ -101,6 +112,21 @@ def _require_tenant_admin(context: RequestContext) -> None:
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant admin role required.")
 
 
+def _authorize_tenant_provision(request: Request, token: str | None) -> None:
+    if token == settings.bootstrap_token.get_secret_value():
+        return
+
+    context = getattr(request.state, "context", None)
+    roles = set(getattr(getattr(context, "identity", None), "roles", []) or [])
+    if "platform_admin" in roles:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Tenant provisioning requires the bootstrap token or a platform_admin identity.",
+    )
+
+
 def _serialize_tenant(tenant: Tenant) -> TenantResponse:
     return TenantResponse(
         tenant_id=tenant.id,
@@ -112,6 +138,18 @@ def _serialize_tenant(tenant: Tenant) -> TenantResponse:
         okta_issuer=tenant.okta_issuer,
         okta_audience=tenant.okta_audience,
         status=tenant.status,
+    )
+
+
+def _serialize_public_tenant(tenant: Tenant) -> PublicTenantResponse:
+    return PublicTenantResponse(
+        tenant_id=tenant.id,
+        slug=tenant.slug,
+        display_name=tenant.display_name,
+        auth_mode=tenant.auth_mode,
+        status=tenant.status,
+        supports_password_login=tenant.auth_mode == "local",
+        okta_issuer=tenant.okta_issuer,
     )
 
 
@@ -138,55 +176,90 @@ async def _ensure_unique_okta_org_id(session: AsyncSession, okta_org_id: str | N
     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="okta_org_id already assigned to another tenant.")
 
 
+async def _resolve_tenant_ref(session: AsyncSession, tenant_ref: str) -> Tenant | None:
+    tenant = await session.scalar(select(Tenant).where(Tenant.slug == tenant_ref))
+    if tenant is not None:
+        return tenant
+    try:
+        tenant_id = UUID(tenant_ref)
+    except ValueError:
+        return None
+    return await session.scalar(select(Tenant).where(Tenant.id == tenant_id))
+
+
+@public_router.get("", response_model=list[PublicTenantResponse])
+async def list_public_tenants(
+    session: AsyncSession = Depends(get_unscoped_db_session),
+) -> list[PublicTenantResponse]:
+    rows = await session.execute(
+        select(Tenant)
+        .where(Tenant.status == "active")
+        .order_by(Tenant.display_name.asc(), Tenant.slug.asc())
+    )
+    return [_serialize_public_tenant(tenant) for tenant in rows.scalars().all()]
+
+
+@public_router.get("/{tenant_ref}", response_model=PublicTenantResponse)
+async def get_public_tenant(
+    tenant_ref: str,
+    session: AsyncSession = Depends(get_unscoped_db_session),
+) -> PublicTenantResponse:
+    tenant = await _resolve_tenant_ref(session, tenant_ref)
+    if tenant is None or tenant.status != "active":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found.")
+    return _serialize_public_tenant(tenant)
+
+
 @router.post("/provision", response_model=ProvisionTenantResponse, status_code=status.HTTP_201_CREATED)
 async def provision_tenant(
-    request: ProvisionTenantRequest,
+    http_request: Request,
+    payload: ProvisionTenantRequest,
     x_bootstrap_token: str | None = Header(default=None, alias="X-Bootstrap-Token"),
     session: AsyncSession = Depends(get_unscoped_db_session),
 ) -> ProvisionTenantResponse:
-    _require_bootstrap_token(x_bootstrap_token)
+    _authorize_tenant_provision(http_request, x_bootstrap_token)
 
-    if request.auth_mode == "local":
-        if request.admin_email is None or request.admin_password is None:
+    if payload.auth_mode == "local":
+        if payload.admin_email is None or payload.admin_password is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Local auth tenants require admin_email and admin_password.",
             )
-    if request.auth_mode == "okta":
-        if request.okta_jwks_url is None and request.okta_org_id is None:
+    if payload.auth_mode == "okta":
+        if payload.okta_jwks_url is None and payload.okta_org_id is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Okta tenants require okta_jwks_url or okta_org_id.",
             )
 
-    existing = await session.scalar(select(Tenant).where(Tenant.slug == request.slug))
+    existing = await session.scalar(select(Tenant).where(Tenant.slug == payload.slug))
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tenant slug already exists.")
-    await _ensure_unique_okta_org_id(session, request.okta_org_id)
+    await _ensure_unique_okta_org_id(session, payload.okta_org_id)
 
     tenant_id = uuid4()
     await set_tenant_rls(session, tenant_id)
     tenant = Tenant(
         id=tenant_id,
-        slug=request.slug,
-        display_name=request.display_name,
-        okta_org_id=request.okta_org_id,
-        auth_mode=request.auth_mode,
-        okta_jwks_url=request.okta_jwks_url,
-        okta_issuer=request.okta_issuer,
-        okta_audience=request.okta_audience,
+        slug=payload.slug,
+        display_name=payload.display_name,
+        okta_org_id=payload.okta_org_id,
+        auth_mode=payload.auth_mode,
+        okta_jwks_url=payload.okta_jwks_url,
+        okta_issuer=payload.okta_issuer,
+        okta_audience=payload.okta_audience,
         status="active",
     )
     session.add(tenant)
     await session.flush()
 
     bootstrap_admin_created = False
-    if request.auth_mode == "local" and request.admin_email and request.admin_password:
+    if payload.auth_mode == "local" and payload.admin_email and payload.admin_password:
         local_admin = LocalAuthUser(
             tenant_id=tenant.id,
-            email=request.admin_email.lower(),
-            password_hash=hash_password(request.admin_password.get_secret_value()),
-            display_name=request.admin_display_name or request.admin_email.split("@", 1)[0],
+            email=payload.admin_email.lower(),
+            password_hash=hash_password(payload.admin_password.get_secret_value()),
+            display_name=payload.admin_display_name or payload.admin_email.split("@", 1)[0],
             roles=["admin", "tenant_admin"],
             is_active=True,
             updated_at=datetime.now(UTC),

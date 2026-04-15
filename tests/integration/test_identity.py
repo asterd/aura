@@ -5,12 +5,14 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from pydantic import SecretStr
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from apps.api.config import settings
 from aura.adapters.db.session import AsyncSessionLocal, set_tenant_rls
 from aura.domain.models import LocalAuthUser, Tenant, User
+from aura.services.bootstrap import ensure_default_tenant
 from aura.utils.passwords import hash_password
 from tests.conftest import (
     TENANT_A,
@@ -189,6 +191,131 @@ async def test_provision_local_tenant_and_login(app_client):
         local_user = await session.scalar(select(LocalAuthUser).where(LocalAuthUser.tenant_id == tenant_id))
         assert local_user is not None
         assert local_user.password_hash != "super-secret-password"
+
+
+async def test_public_tenant_catalog_exposes_active_tenants(app_client):
+    tenant_slug = f"catalog-{uuid4().hex[:8]}"
+    provision = await app_client.post(
+        "/api/v1/admin/tenants/provision",
+        headers={"X-Bootstrap-Token": settings.bootstrap_token.get_secret_value()},
+        json={
+            "slug": tenant_slug,
+            "display_name": "Catalog Tenant",
+            "auth_mode": "local",
+            "admin_email": "catalog-admin@example.com",
+            "admin_password": "catalog-password",
+            "admin_display_name": "Catalog Admin",
+        },
+    )
+    assert provision.status_code == 201, provision.text
+
+    listing = await app_client.get("/api/v1/public/tenants")
+    assert listing.status_code == 200, listing.text
+    assert any(item["slug"] == tenant_slug and item["supports_password_login"] is True for item in listing.json())
+
+    detail = await app_client.get(f"/api/v1/public/tenants/{tenant_slug}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["slug"] == tenant_slug
+    assert detail.json()["auth_mode"] == "local"
+
+
+async def test_default_tenant_bootstrap_creates_local_admin():
+    tenant_slug = f"default-{uuid4().hex[:8]}"
+    admin_email = f"bootstrap-{uuid4().hex[:8]}@example.com"
+
+    old_enabled = settings.default_tenant_enabled
+    old_slug = settings.default_tenant_slug
+    old_display_name = settings.default_tenant_display_name
+    old_auth_mode = settings.default_tenant_auth_mode
+    old_admin_email = settings.default_tenant_admin_email
+    old_admin_password = settings.default_tenant_admin_password
+    old_admin_display_name = settings.default_tenant_admin_display_name
+
+    settings.default_tenant_enabled = True
+    settings.default_tenant_slug = tenant_slug
+    settings.default_tenant_display_name = "Bootstrap Tenant"
+    settings.default_tenant_auth_mode = "local"
+    settings.default_tenant_admin_email = admin_email
+    settings.default_tenant_admin_password = SecretStr("bootstrap-password")
+    settings.default_tenant_admin_display_name = "Bootstrap Admin"
+    try:
+        await ensure_default_tenant()
+
+        async with AsyncSessionLocal() as session:
+            tenant = await session.scalar(select(Tenant).where(Tenant.slug == tenant_slug))
+            assert tenant is not None
+            await set_tenant_rls(session, tenant.id)
+            local_user = await session.scalar(
+                select(LocalAuthUser).where(
+                    LocalAuthUser.tenant_id == tenant.id,
+                    LocalAuthUser.email == admin_email,
+                )
+            )
+            assert local_user is not None
+            assert "tenant_admin" in list(local_user.roles or [])
+    finally:
+        settings.default_tenant_enabled = old_enabled
+        settings.default_tenant_slug = old_slug
+        settings.default_tenant_display_name = old_display_name
+        settings.default_tenant_auth_mode = old_auth_mode
+        settings.default_tenant_admin_email = old_admin_email
+        settings.default_tenant_admin_password = old_admin_password
+        settings.default_tenant_admin_display_name = old_admin_display_name
+
+
+async def test_platform_admin_can_provision_tenant_without_bootstrap_token(app_client):
+    tenant_slug = f"default-{uuid4().hex[:8]}"
+    admin_email = f"platform-{uuid4().hex[:8]}@example.com"
+
+    old_enabled = settings.default_tenant_enabled
+    old_slug = settings.default_tenant_slug
+    old_display_name = settings.default_tenant_display_name
+    old_auth_mode = settings.default_tenant_auth_mode
+    old_admin_email = settings.default_tenant_admin_email
+    old_admin_password = settings.default_tenant_admin_password
+    old_admin_display_name = settings.default_tenant_admin_display_name
+
+    settings.default_tenant_enabled = True
+    settings.default_tenant_slug = tenant_slug
+    settings.default_tenant_display_name = "DEFAULT"
+    settings.default_tenant_auth_mode = "local"
+    settings.default_tenant_admin_email = admin_email
+    settings.default_tenant_admin_password = SecretStr("platform-password")
+    settings.default_tenant_admin_display_name = "Platform Admin"
+    try:
+        await ensure_default_tenant()
+
+        login = await app_client.post(
+            "/api/v1/auth/local/login",
+            json={
+                "tenant_slug": tenant_slug,
+                "email": admin_email,
+                "password": "platform-password",
+            },
+        )
+        assert login.status_code == 200, login.text
+
+        provision = await app_client.post(
+            "/api/v1/admin/tenants/provision",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+            json={
+                "slug": f"child-{uuid4().hex[:8]}",
+                "display_name": "Child Tenant",
+                "auth_mode": "local",
+                "admin_email": "child-admin@example.com",
+                "admin_password": "child-password",
+                "admin_display_name": "Child Admin",
+            },
+        )
+        assert provision.status_code == 201, provision.text
+    finally:
+        settings.default_tenant_enabled = old_enabled
+        settings.default_tenant_slug = old_slug
+        settings.default_tenant_display_name = old_display_name
+        settings.default_tenant_auth_mode = old_auth_mode
+        settings.default_tenant_admin_email = old_admin_email
+        settings.default_tenant_admin_password = old_admin_password
+        settings.default_tenant_admin_display_name = old_admin_display_name
 
 
 async def test_local_tenant_admin_can_manage_users_and_auth_mode(app_client):

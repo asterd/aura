@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     sandbox_docker_binary: str = Field(default="docker", alias="SANDBOX_DOCKER_BINARY")
     sandbox_default_python_image: str = Field(default="python:3.12-slim", alias="SANDBOX_DEFAULT_PYTHON_IMAGE")
     mcp_client_timeout_s: int = Field(default=30, alias="MCP_CLIENT_TIMEOUT_S")
+    default_tenant_enabled: bool = Field(default=False, alias="AURA_DEFAULT_TENANT_ENABLED")
+    default_tenant_slug: str = Field(default="default", alias="AURA_DEFAULT_TENANT_SLUG")
+    default_tenant_display_name: str = Field(default="Default Workspace", alias="AURA_DEFAULT_TENANT_DISPLAY_NAME")
+    default_tenant_auth_mode: str = Field(default="local", alias="AURA_DEFAULT_TENANT_AUTH_MODE")
+    default_tenant_admin_email: str | None = Field(default=None, alias="AURA_DEFAULT_TENANT_ADMIN_EMAIL")
+    default_tenant_admin_password: SecretStr | None = Field(default=None, alias="AURA_DEFAULT_TENANT_ADMIN_PASSWORD")
+    default_tenant_admin_display_name: str | None = Field(default=None, alias="AURA_DEFAULT_TENANT_ADMIN_DISPLAY_NAME")
     postgres_connect_timeout_s: float = 5.0
     service_check_timeout_s: float = 5.0
     api_prefix: str = "/api/v1"

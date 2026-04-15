@@ -1,0 +1,122 @@
+services:
+  qdrant:
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "exec 3<>/dev/tcp/127.0.0.1/6333; printf 'GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  litellm-proxy:
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=5).status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aura_app:aura_app@postgres:5432/aura
+      ALEMBIC_DATABASE_URL: postgresql+asyncpg://aura_service:aura_service@postgres:5432/aura
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      S3_ENDPOINT_URL: http://minio:9000
+      LITELLM_BASE_URL: http://litellm-proxy:4000
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    env_file:
+      - .env
+    environment:
+      AURA_DEFAULT_TENANT_ENABLED: "true"
+      AURA_DEFAULT_TENANT_SLUG: "default"
+      AURA_DEFAULT_TENANT_DISPLAY_NAME: "DEFAULT"
+      AURA_DEFAULT_TENANT_AUTH_MODE: "local"
+      AURA_DEFAULT_TENANT_ADMIN_EMAIL: "admin@example.com"
+      AURA_DEFAULT_TENANT_ADMIN_PASSWORD: "change-me-now"
+      AURA_DEFAULT_TENANT_ADMIN_DISPLAY_NAME: "Platform Admin"
+      DATABASE_URL: postgresql+asyncpg://aura_app:aura_app@postgres:5432/aura
+      ALEMBIC_DATABASE_URL: postgresql+asyncpg://aura_service:aura_service@postgres:5432/aura
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      S3_ENDPOINT_URL: http://minio:9000
+      LITELLM_BASE_URL: http://litellm-proxy:4000
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      litellm-proxy:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aura_app:aura_app@postgres:5432/aura
+      ALEMBIC_DATABASE_URL: postgresql+asyncpg://aura_service:aura_service@postgres:5432/aura
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      S3_ENDPOINT_URL: http://minio:9000
+      LITELLM_BASE_URL: http://litellm-proxy:4000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      litellm-proxy:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: ../../infra/docker/Dockerfile.web
+      args:
+        AURA_API_BASE_URL: http://api:8000
+        AURA_API_PROXY_TARGET: http://api:8000
+    environment:
+      AURA_API_BASE_URL: http://api:8000
+      AURA_API_PROXY_TARGET: http://api:8000
+      AURA_OIDC_SCOPES: openid profile email
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_started
