@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from infra.alembic.role_helpers import alter_table_owner_if_role_exists, grant_on_table_if_role_exists
+
 
 revision = "011_api_keys"
 down_revision = "010_tenant_auth_modes"
@@ -32,8 +34,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.execute("ALTER TABLE api_keys OWNER TO aura_service")
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE api_keys TO aura_app")
+    alter_table_owner_if_role_exists("api_keys", "aura_service")
+    grant_on_table_if_role_exists("api_keys", "aura_app", "SELECT, INSERT, UPDATE, DELETE")
     op.create_index("ix_api_keys_key_hash", "api_keys", ["key_hash"])
     op.create_index("ix_api_keys_tenant_id", "api_keys", ["tenant_id"])
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from infra.alembic.role_helpers import alter_table_owner_if_role_exists, grant_on_schema_if_role_exists, grant_on_table_if_role_exists
+
 
 revision = "001_initial_tenants"
 down_revision = None
@@ -32,9 +34,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("slug", name="uq_tenants_slug"),
         sa.UniqueConstraint("okta_org_id", name="uq_tenants_okta_org_id"),
     )
-    op.execute("ALTER TABLE tenants OWNER TO aura_service")
-    op.execute("GRANT USAGE ON SCHEMA public TO aura_app")
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE tenants TO aura_app")
+    alter_table_owner_if_role_exists("tenants", "aura_service")
+    grant_on_schema_if_role_exists("public", "aura_app", "USAGE")
+    grant_on_table_if_role_exists("tenants", "aura_app", "SELECT, INSERT, UPDATE, DELETE")
 
 
 def downgrade() -> None:

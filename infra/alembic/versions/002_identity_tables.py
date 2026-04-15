@@ -6,6 +6,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from infra.alembic.role_helpers import alter_table_owner_if_role_exists, grant_on_table_if_role_exists
+
 
 revision = "002_identity_tables"
 down_revision = "001_initial_tenants"
@@ -45,8 +47,8 @@ def upgrade() -> None:
     )
 
     for table_name in ("users", "groups", "user_group_memberships"):
-        op.execute(f"ALTER TABLE {table_name} OWNER TO aura_service")
-        op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table_name} TO aura_app")
+        alter_table_owner_if_role_exists(table_name, "aura_service")
+        grant_on_table_if_role_exists(table_name, "aura_app", "SELECT, INSERT, UPDATE, DELETE")
         op.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY")
 

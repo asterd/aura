@@ -5,6 +5,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from infra.alembic.role_helpers import alter_table_owner_if_role_exists, grant_on_table_if_role_exists
+
 
 revision = "003_spaces_and_profiles"
 down_revision = "002_identity_tables"
@@ -13,8 +15,8 @@ depends_on = None
 
 
 def _configure_tenant_table(table_name: str, *, tenant_column: str = "tenant_id") -> None:
-    op.execute(f"ALTER TABLE {table_name} OWNER TO aura_service")
-    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table_name} TO aura_app")
+    alter_table_owner_if_role_exists(table_name, "aura_service")
+    grant_on_table_if_role_exists(table_name, "aura_app", "SELECT, INSERT, UPDATE, DELETE")
     op.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
     op.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY")
     op.execute(
@@ -119,8 +121,8 @@ def upgrade() -> None:
     for table_name in ("retrieval_profiles", "embedding_profiles", "tone_profiles", "knowledge_spaces"):
         _configure_tenant_table(table_name)
 
-    op.execute("ALTER TABLE space_memberships OWNER TO aura_service")
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE space_memberships TO aura_app")
+    alter_table_owner_if_role_exists("space_memberships", "aura_service")
+    grant_on_table_if_role_exists("space_memberships", "aura_app", "SELECT, INSERT, UPDATE, DELETE")
     op.execute("ALTER TABLE space_memberships ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE space_memberships FORCE ROW LEVEL SECURITY")
     op.execute(

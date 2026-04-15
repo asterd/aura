@@ -8,6 +8,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from apps.api.config import settings
+from infra.alembic.role_helpers import set_role_if_exists
 
 
 config = context.config
@@ -35,7 +36,7 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():
-        connection.exec_driver_sql("SET ROLE aura_service")
+        set_role_if_exists(connection, "aura_service")
         context.run_migrations()
 
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from infra.alembic.role_helpers import alter_table_owner_if_role_exists, grant_on_table_if_role_exists
+
 
 revision = "009_llm_governance"
 down_revision = "008_skill_registry"
@@ -13,8 +15,8 @@ depends_on = None
 
 
 def _configure_tenant_table(table_name: str, *, tenant_column: str = "tenant_id") -> None:
-    op.execute(f"ALTER TABLE {table_name} OWNER TO aura_service")
-    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table_name} TO aura_app")
+    alter_table_owner_if_role_exists(table_name, "aura_service")
+    grant_on_table_if_role_exists(table_name, "aura_app", "SELECT, INSERT, UPDATE, DELETE")
     op.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
     op.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY")
     op.execute(
@@ -44,8 +46,8 @@ def upgrade() -> None:
         sa.CheckConstraint("status IN ('active','disabled','deprecated')", name="ck_llm_providers_status"),
         sa.UniqueConstraint("provider_key", name="uq_llm_providers_provider_key"),
     )
-    op.execute("ALTER TABLE llm_providers OWNER TO aura_service")
-    op.execute("GRANT SELECT ON TABLE llm_providers TO aura_app")
+    alter_table_owner_if_role_exists("llm_providers", "aura_service")
+    grant_on_table_if_role_exists("llm_providers", "aura_app", "SELECT")
 
     op.create_table(
         "tenant_provider_credentials",

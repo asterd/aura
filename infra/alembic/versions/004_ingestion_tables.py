@@ -5,6 +5,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from infra.alembic.role_helpers import alter_table_owner_if_role_exists, grant_on_table_if_role_exists
+
 
 revision = "004_ingestion_tables"
 down_revision = "003_spaces_and_profiles"
@@ -13,8 +15,8 @@ depends_on = None
 
 
 def _configure_tenant_table(table_name: str, *, tenant_column: str = "tenant_id") -> None:
-    op.execute(f"ALTER TABLE {table_name} OWNER TO aura_service")
-    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table_name} TO aura_app")
+    alter_table_owner_if_role_exists(table_name, "aura_service")
+    grant_on_table_if_role_exists(table_name, "aura_app", "SELECT, INSERT, UPDATE, DELETE")
     op.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
     op.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY")
     op.execute(
