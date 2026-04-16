@@ -7,17 +7,16 @@ interface Props {
 export function AgentIndicator({ agentName }: Props) {
   return (
     <div
-      className="flex items-center gap-2 px-4 py-2 mx-4 my-1 rounded-lg text-xs agent-pulse"
+      className="inline-flex items-center gap-2.5 rounded-xl border px-3 py-2 text-xs agent-pulse"
       style={{
-        backgroundColor: "rgba(99,102,241,0.1)",
-        border: "1px solid rgba(99,102,241,0.3)",
-        color: "var(--muted-foreground)",
+        background: "var(--accent-subtle)",
+        borderColor: "var(--accent-muted)",
+        color: "var(--accent)",
       }}
     >
-      <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
-      <span>
-        Running agent: <strong style={{ color: "var(--foreground)" }}>{agentName}</strong>
-        ...
+      <div className="spinner spinner-sm" style={{ borderColor: "var(--accent-muted)", borderTopColor: "var(--accent)" }} />
+      <span className="font-medium">
+        Running <span className="font-semibold">{agentName}</span>…
       </span>
     </div>
   );

@@ -8,15 +8,32 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
-COPY apps/ ./apps/
-COPY aura/ ./aura/
-COPY registries/ ./registries/
+RUN python - <<'PY' >/tmp/requirements.txt
+import tomllib
+from pathlib import Path
 
-RUN --mount=type=secret,id=corporate_ca,target=/run/secrets/corporate_ca,required=false \
+project = tomllib.loads(Path("pyproject.toml").read_text())
+for dependency in project["project"]["dependencies"]:
+    print(dependency)
+PY
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=secret,id=corporate_ca,target=/run/secrets/corporate_ca,required=false \
     sh -lc 'if [ -f /run/secrets/corporate_ca ]; then \
       export PIP_CERT=/run/secrets/corporate_ca REQUESTS_CA_BUNDLE=/run/secrets/corporate_ca SSL_CERT_FILE=/run/secrets/corporate_ca; \
     fi; \
-    pip install --no-cache-dir .'
+    pip install -r /tmp/requirements.txt'
+
+COPY apps/ ./apps/
+COPY aura/ ./aura/
+COPY infra/ ./infra/
+COPY registries/ ./registries/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=secret,id=corporate_ca,target=/run/secrets/corporate_ca,required=false \
+    sh -lc 'if [ -f /run/secrets/corporate_ca ]; then \
+      export PIP_CERT=/run/secrets/corporate_ca REQUESTS_CA_BUNDLE=/run/secrets/corporate_ca SSL_CERT_FILE=/run/secrets/corporate_ca; \
+    fi; \
+    pip install --no-deps .'
+RUN chmod +x /app/infra/docker/worker-entrypoint.sh
 
 ENV PYTHONPATH=/app
-CMD ["arq", "apps.worker.worker_settings.WorkerSettings"]
+CMD ["/app/infra/docker/worker-entrypoint.sh"]

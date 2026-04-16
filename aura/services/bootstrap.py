@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import boto3
+from botocore.exceptions import ClientError
 from sqlalchemy import select
 
 from apps.api.config import settings
@@ -13,6 +16,30 @@ from aura.utils.passwords import hash_password
 
 
 logger = logging.getLogger("aura")
+
+
+async def ensure_s3_bucket() -> None:
+    def _ensure() -> None:
+        client = boto3.client(
+            "s3",
+            endpoint_url=str(settings.s3_endpoint_url),
+            aws_access_key_id=settings.s3_access_key_id,
+            aws_secret_access_key=settings.s3_secret_access_key.get_secret_value(),
+            region_name=settings.s3_region,
+            use_ssl=settings.s3_secure,
+        )
+        try:
+            client.head_bucket(Bucket=settings.s3_bucket_name)
+            return
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code")
+            if error_code not in {"404", "NoSuchBucket"}:
+                raise
+
+        client.create_bucket(Bucket=settings.s3_bucket_name)
+        logger.info("default_s3_bucket_created bucket=%s", settings.s3_bucket_name)
+
+    await asyncio.to_thread(_ensure)
 
 
 async def ensure_default_tenant() -> None:

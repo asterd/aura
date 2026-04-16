@@ -1,99 +1,75 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuraStore } from "@/lib/store";
+import { Button, Card } from "./ui";
+import { Icon } from "./icons";
 
 interface Props {
   onCreateSpace: () => void;
 }
 
+const STORAGE_KEY = "aura-onboarding-dismissed";
+
 export function OnboardingBanner({ onCreateSpace }: Props) {
   const { availableSpaces } = useAuraStore();
   const [dismissed, setDismissed] = useState(false);
 
-  // Show only when: no spaces available AND not dismissed
+  useEffect(() => {
+    setDismissed(window.localStorage.getItem(STORAGE_KEY) === "true");
+  }, []);
+
   if (availableSpaces.length > 0 || dismissed) return null;
 
+  const dismiss = () => {
+    window.localStorage.setItem(STORAGE_KEY, "true");
+    setDismissed(true);
+  };
+
   return (
-    <div
-      className="mx-4 mt-4 rounded-2xl p-5"
-      style={{
-        backgroundColor: "rgba(99,102,241,0.08)",
-        border: "1px solid rgba(99,102,241,0.2)",
-      }}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-3">
-          <div>
-            <h3 className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>
-              Welcome to AURA
-            </h3>
-            <p className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>
-              You can chat freely with the AI, or create a Knowledge Space to chat with your company
-              documents.
+    <Card className="relative mb-5 overflow-hidden border-[color:var(--accent)]/15 bg-[linear-gradient(135deg,rgba(99,102,241,0.09),rgba(6,182,212,0.04))]">
+      <div className="flex flex-col gap-5 p-5 md:flex-row md:items-start md:justify-between">
+        <div className="flex items-start gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl brand-gradient text-white shadow-[var(--shadow-accent)]">
+            <Icon name="logo" className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-[color:var(--text-primary)]">Onboarding</p>
+            <p className="mt-1 max-w-2xl text-sm text-[color:var(--text-secondary)]">
+              Create a Knowledge Space, upload documents and start grounded conversations.
             </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={onCreateSpace}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium"
-              style={{
-                backgroundColor: "var(--accent)",
-                color: "var(--accent-foreground)",
-              }}
-            >
-              Create Knowledge Space
-            </button>
-            <button
-              onClick={() => setDismissed(true)}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium"
-              style={{
-                backgroundColor: "var(--surface-raised)",
-                color: "var(--muted-foreground)",
-                border: "1px solid var(--border)",
-              }}
-            >
-              Start chatting freely
-            </button>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3 mt-2">
-            {[
-              { step: "1", text: "Create a Space", icon: "🗂️" },
-              { step: "2", text: "Upload documents", icon: "📄" },
-              { step: "3", text: "Chat with your data", icon: "💬" },
-            ].map(({ step, text, icon }) => (
-              <div
-                key={step}
-                className="flex flex-col items-center gap-1 p-2 rounded-xl text-center"
-                style={{ backgroundColor: "var(--surface-raised)" }}
-              >
-                <span className="text-lg">{icon}</span>
-                <span className="text-xs font-medium" style={{ color: "var(--foreground)" }}>
-                  {step}. {text}
-                </span>
-              </div>
-            ))}
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              {[
+                ["1", "Create a Space"],
+                ["2", "Upload docs"],
+                ["3", "Chat with data"],
+              ].map(([step, label]) => (
+                <div key={step} className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-1)] px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--text-tertiary)]">Step {step}</p>
+                  <p className="mt-1 text-sm font-medium text-[color:var(--text-primary)]">{label}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        <button
-          onClick={() => setDismissed(true)}
-          className="flex-shrink-0 opacity-50 hover:opacity-100"
-          style={{ color: "var(--muted-foreground)" }}
-          aria-label="Dismiss"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <Button onClick={onCreateSpace}>
+            <Icon name="plus" className="h-4 w-4" />
+            Create Knowledge Space
+          </Button>
+          <Button variant="secondary" onClick={dismiss}>
+            Start chatting freely
+          </Button>
+        </div>
       </div>
-    </div>
+      <button
+        onClick={dismiss}
+        className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-[color:var(--text-tertiary)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--text-primary)]"
+        aria-label="Dismiss onboarding"
+      >
+        <Icon name="chevron-left" className="h-4 w-4 rotate-180" />
+      </button>
+    </Card>
   );
 }

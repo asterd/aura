@@ -50,17 +50,10 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      className="rounded-2xl p-6"
-      style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
-    >
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold" style={{ color: "var(--foreground)" }}>
-          {title}
-        </h2>
-        <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
-          {description}
-        </p>
+    <section className="rounded-2xl border border-border-subtle bg-surface-1 p-6">
+      <div className="mb-5">
+        <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
+        <p className="mt-0.5 text-xs text-text-tertiary">{description}</p>
       </div>
       {children}
     </section>
@@ -75,16 +68,12 @@ function DataTable({
   rows: Array<Array<string | number | boolean | null | undefined>>;
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl" style={{ border: "1px solid var(--border)" }}>
+    <div className="overflow-x-auto rounded-xl border border-border-subtle">
       <table className="w-full text-sm">
-        <thead style={{ backgroundColor: "var(--surface-raised)" }}>
+        <thead className="bg-surface-2">
           <tr>
             {columns.map((column) => (
-              <th
-                key={column}
-                className="px-3 py-2 text-left font-medium"
-                style={{ color: "var(--foreground)" }}
-              >
+              <th key={column} className="px-3 py-2.5 text-left text-xs font-semibold text-text-secondary">
                 {column}
               </th>
             ))}
@@ -93,23 +82,15 @@ function DataTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td
-                colSpan={columns.length}
-                className="px-3 py-4 text-center"
-                style={{ color: "var(--muted-foreground)" }}
-              >
+              <td colSpan={columns.length} className="px-3 py-5 text-center text-xs text-text-tertiary">
                 No data
               </td>
             </tr>
           ) : (
             rows.map((row, index) => (
-              <tr key={index} style={{ borderTop: "1px solid var(--border)" }}>
+              <tr key={index} className="border-t border-border-subtle hover:bg-surface-hover transition-colors">
                 {row.map((value, cellIndex) => (
-                  <td
-                    key={`${index}-${cellIndex}`}
-                    className="px-3 py-2 align-top"
-                    style={{ color: "var(--muted-foreground)" }}
-                  >
+                  <td key={`${index}-${cellIndex}`} className="px-3 py-2.5 align-top text-xs text-text-secondary">
                     {String(value ?? "")}
                   </td>
                 ))}
@@ -126,12 +107,7 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
-      style={{
-        backgroundColor: "var(--surface-raised)",
-        border: "1px solid var(--border)",
-        color: "var(--foreground)",
-      }}
+      className="w-full rounded-lg border border-border-default bg-surface-2 px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 transition-all"
     />
   );
 }
@@ -157,8 +133,8 @@ function ActionButton({
   return (
     <button
       {...props}
-      className="rounded-lg px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
-      style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
+      className="rounded-lg px-3.5 py-2 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+      style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-dark))" }}
     >
       {children}
     </button>
@@ -617,13 +593,11 @@ export function AdminConsole() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold" style={{ color: "var(--foreground)" }}>
-            Admin Console
-          </h1>
-          <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
+          <h2 className="text-sm font-semibold text-text-primary">Admin Console</h2>
+          <p className="mt-0.5 text-xs text-text-tertiary">
             Tenant bootstrap, auth modes, LiteLLM governance, budgets and usage.
           </p>
         </div>
@@ -631,15 +605,15 @@ export function AdminConsole() {
       </div>
 
       {me && (
-        <div
-          className="rounded-2xl p-4 text-sm"
-          style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
-        >
-          <div style={{ color: "var(--foreground)" }}>
-            Signed in as <strong>{me.identity.email}</strong>
-          </div>
-          <div className="mt-1" style={{ color: "var(--muted-foreground)" }}>
-            Tenant: {me.identity.tenant_id} | Roles: {(me.identity.roles || []).join(", ") || "none"}
+        <div className="rounded-xl border border-border-subtle bg-surface-2 px-4 py-3">
+          <div className="flex items-center gap-2 text-xs">
+            <div className="h-2 w-2 rounded-full bg-success" />
+            <span className="text-text-secondary">
+              Signed in as <strong className="text-text-primary">{me.identity.email}</strong>
+            </span>
+            <span className="ml-auto text-text-tertiary">
+              Roles: {(me.identity.roles || []).join(", ") || "user"}
+            </span>
           </div>
         </div>
       )}

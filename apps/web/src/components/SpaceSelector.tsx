@@ -14,13 +14,10 @@ export function SpaceSelector({ spaces, selectedIds, onChange, disabled }: Props
   const [open, setOpen] = useState(false);
 
   const toggle = (id: string) => {
-    if (selectedIds.includes(id)) {
-      onChange(selectedIds.filter((s) => s !== id));
-    } else {
-      onChange([...selectedIds, id]);
-    }
+    onChange(selectedIds.includes(id) ? selectedIds.filter((s) => s !== id) : [...selectedIds, id]);
   };
 
+  const isFreeChatMode = selectedIds.length === 0;
   const label =
     selectedIds.length === 0
       ? "Free Chat"
@@ -28,129 +25,100 @@ export function SpaceSelector({ spaces, selectedIds, onChange, disabled }: Props
       ? (spaces.find((s) => s.id === selectedIds[0])?.name ?? "1 space")
       : `${selectedIds.length} spaces`;
 
-  const isFreeChatMode = selectedIds.length === 0;
-
   return (
     <div className="relative">
       <button
         onClick={() => !disabled && setOpen((o) => !o)}
         disabled={disabled}
-        className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50"
         style={{
-          backgroundColor: isFreeChatMode ? "var(--surface-raised)" : "var(--accent)",
-          color: isFreeChatMode ? "var(--muted-foreground)" : "var(--accent-foreground)",
-          border: "1px solid var(--border)",
-          opacity: disabled ? 0.5 : 1,
-          cursor: disabled ? "not-allowed" : "pointer",
+          background: isFreeChatMode ? "var(--surface-3)" : "var(--accent-subtle)",
+          border: `1px solid ${isFreeChatMode ? "var(--border-subtle)" : "var(--accent-muted)"}`,
+          color: isFreeChatMode ? "var(--text-tertiary)" : "var(--accent)",
         }}
-        title="Select knowledge spaces"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        {/* Book/space icon */}
-        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-          />
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
         </svg>
         <span>{label}</span>
         <svg
-          className={`w-3 h-3 flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
+          className={`transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+          width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          <path d="M6 9l6 6 6-6"/>
         </svg>
       </button>
 
       {open && (
         <>
-          {/* Click-outside overlay */}
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-
           <div
             role="listbox"
-            className="absolute bottom-full mb-2 left-0 w-72 rounded-xl shadow-xl overflow-hidden z-30"
-            style={{
-              backgroundColor: "var(--surface-raised)",
-              border: "1px solid var(--border)",
-            }}
+            className="absolute bottom-full left-0 z-30 mb-2 w-72 overflow-hidden rounded-xl border border-border-default bg-surface-1 shadow-xl animate-scale-in"
           >
-            {/* Header */}
-            <div className="px-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
-              <p className="text-xs font-semibold tracking-wide" style={{ color: "var(--muted-foreground)" }}>
-                KNOWLEDGE SPACES
+            <div className="border-b border-border-subtle px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                Knowledge Spaces
               </p>
             </div>
 
-            {/* Free Chat option */}
+            {/* Free Chat */}
             <button
               role="option"
               aria-selected={isFreeChatMode}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onChange([]);
-                setOpen(false);
-              }}
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:opacity-80 transition-opacity"
-              style={{ borderBottom: "1px solid var(--border)" }}
+              onMouseDown={(e) => { e.preventDefault(); onChange([]); setOpen(false); }}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-surface-hover"
             >
               <Checkbox checked={isFreeChatMode} />
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium" style={{ color: "var(--foreground)" }}>
-                  Free Chat
-                </span>
+              <div className="flex min-w-0 flex-1 items-center justify-between">
+                <span className="text-sm font-medium text-text-primary">Free Chat</span>
+                <span className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">No RAG</span>
               </div>
-              <span className="text-xs flex-shrink-0" style={{ color: "var(--muted-foreground)" }}>
-                No RAG
-              </span>
             </button>
 
-            {/* Space list */}
+            {/* Spaces */}
             {spaces.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-center" style={{ color: "var(--muted-foreground)" }}>
-                No knowledge spaces available.
-                <br />
+              <div className="px-3 py-4 text-center text-xs text-text-tertiary">
+                No knowledge spaces available.<br />
                 Ask an admin to create one.
               </div>
             ) : (
-              spaces.map((space) => {
-                const selected = selectedIds.includes(space.id);
-                return (
-                  <button
-                    key={space.id}
-                    role="option"
-                    aria-selected={selected}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      toggle(space.id);
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:opacity-80 transition-opacity"
-                    style={{ borderBottom: "1px solid var(--border)" }}
-                  >
-                    <Checkbox checked={selected} />
-                    <div className="flex flex-col items-start min-w-0 flex-1">
-                      <span className="text-sm font-medium truncate w-full" style={{ color: "var(--foreground)" }}>
-                        {space.name}
-                      </span>
-                      {space.slug && (
-                        <span className="text-xs truncate w-full" style={{ color: "var(--muted-foreground)" }}>
-                          {space.slug}
+              <div className="max-h-48 overflow-y-auto">
+                {spaces.map((space) => {
+                  const selected = selectedIds.includes(space.id);
+                  return (
+                    <button
+                      key={space.id}
+                      role="option"
+                      aria-selected={selected}
+                      onMouseDown={(e) => { e.preventDefault(); toggle(space.id); }}
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-surface-hover"
+                    >
+                      <Checkbox checked={selected} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-text-primary">{space.name}</div>
+                        {space.slug && <div className="truncate text-[11px] text-text-tertiary">{space.slug}</div>}
+                      </div>
+                      {space.space_type && (
+                        <span
+                          className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase"
+                          style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}
+                        >
+                          {space.space_type}
                         </span>
                       )}
-                    </div>
-                  </button>
-                );
-              })
+                    </button>
+                  );
+                })}
+              </div>
             )}
 
-            {/* Footer hint */}
-            <div className="px-3 py-2 text-xs" style={{ color: "var(--muted-foreground)", borderTop: "1px solid var(--border)" }}>
-              Tip: type <strong>#space-name</strong> in your message to mention a space
+            <div className="border-t border-border-subtle px-3 py-2">
+              <p className="text-[10px] text-text-tertiary">
+                Tip: type <code className="rounded bg-surface-3 px-1 font-mono">#space-name</code> to mention a space
+              </p>
             </div>
           </div>
         </>
@@ -162,16 +130,16 @@ export function SpaceSelector({ spaces, selectedIds, onChange, disabled }: Props
 function Checkbox({ checked }: { checked: boolean }) {
   return (
     <span
-      className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center"
+      className="flex h-4 w-4 shrink-0 items-center justify-center rounded"
       style={{
-        border: `2px solid ${checked ? "var(--accent)" : "var(--border)"}`,
-        backgroundColor: checked ? "var(--accent)" : "transparent",
-        transition: "background-color 0.1s, border-color 0.1s",
+        border: `1.5px solid ${checked ? "var(--accent)" : "var(--border-default)"}`,
+        background: checked ? "var(--accent)" : "transparent",
+        transition: "all 0.1s",
       }}
     >
       {checked && (
-        <svg className="w-2.5 h-2.5" fill="none" stroke="var(--accent-foreground)" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round">
+          <path d="M20 6L9 17l-5-5"/>
         </svg>
       )}
     </span>

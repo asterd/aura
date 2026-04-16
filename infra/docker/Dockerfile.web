@@ -8,7 +8,8 @@ ENV AURA_API_BASE_URL=$AURA_API_BASE_URL
 ENV AURA_API_PROXY_TARGET=$AURA_API_PROXY_TARGET
 
 COPY package*.json ./
-RUN --mount=type=secret,id=corporate_ca,target=/run/secrets/corporate_ca,required=false \
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=secret,id=corporate_ca,target=/run/secrets/corporate_ca,required=false \
     sh -lc 'if [ -f /run/secrets/corporate_ca ]; then \
       export NODE_EXTRA_CA_CERTS=/run/secrets/corporate_ca; \
     fi; \

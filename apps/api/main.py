@@ -41,7 +41,7 @@ from aura.adapters.db.models import Group
 from aura.adapters.db.models import User as DbUser
 from aura.domain.contracts import RequestContext, UserIdentity
 from aura.domain.models import User
-from aura.services.bootstrap import ensure_default_tenant
+from aura.services.bootstrap import ensure_default_tenant, ensure_s3_bucket
 from aura.utils.observability import (
     get_gauge_value,
     init_otel,
@@ -93,6 +93,7 @@ health_engine = create_async_engine(
 
 @app.on_event("startup")
 async def bootstrap_default_tenant() -> None:
+    await ensure_s3_bucket()
     await ensure_default_tenant()
 
 
@@ -217,6 +218,11 @@ async def health() -> HealthResponse:
             "aura.identity.sync_freshness_s": identity_sync_freshness,
         },
     )
+
+
+@app.get(f"{settings.api_prefix}/ready")
+async def ready() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.get(f"{settings.api_prefix}/me", response_model=MeResponse)

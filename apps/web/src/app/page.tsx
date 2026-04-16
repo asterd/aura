@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { fetchPublicTenants } from "@/lib/tenant-auth";
+import { PublicTenantInfo } from "@/lib/types";
 
 export default async function RootPage() {
   const cookieStore = await cookies();
@@ -11,76 +13,134 @@ export default async function RootPage() {
   }
 
   const tenants = await fetchPublicTenants();
-  const defaultTenant = tenants.find((tenant) => tenant.slug === "default") || tenants[0] || null;
 
   return (
-    <div className="min-h-screen px-6 py-10" style={{ backgroundColor: "var(--background)" }}>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
-        <div className="max-w-2xl">
-          <p className="text-xs uppercase tracking-[0.24em]" style={{ color: "var(--muted-foreground)" }}>
-            Workspace Access
-          </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight" style={{ color: "var(--foreground)" }}>
-            Choose your tenant
-          </h1>
-          <p className="mt-3 text-sm leading-6" style={{ color: "var(--muted-foreground)" }}>
-            The application starts from the tenant and then selects the correct authentication flow for that workspace.
-          </p>
-        </div>
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-bg-base px-4 py-12">
+      {/* Ambient gradient background */}
+      <div
+        className="pointer-events-none absolute inset-0 overflow-hidden"
+        aria-hidden="true"
+      >
+        <div
+          className="absolute -top-40 left-1/2 h-[700px] w-[700px] -translate-x-1/2 rounded-full opacity-20 blur-3xl"
+          style={{ background: "radial-gradient(circle, var(--accent) 0%, transparent 70%)" }}
+        />
+        <div
+          className="absolute bottom-0 right-0 h-[400px] w-[500px] rounded-full opacity-10 blur-3xl"
+          style={{ background: "radial-gradient(circle, var(--accent-light) 0%, transparent 70%)" }}
+        />
+      </div>
 
-        <div className="rounded-[28px] border p-8" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
-          <form action="/tenant/select" className="space-y-4">
-            <label htmlFor="tenant" className="block text-sm font-medium" style={{ color: "var(--foreground)" }}>
-              Tenant
-            </label>
-            <select
-              id="tenant"
-              name="tenant"
-              defaultValue={defaultTenant?.slug}
-              className="w-full rounded-2xl px-4 py-4 text-sm outline-none"
-              style={{ backgroundColor: "var(--surface-raised)", border: "1px solid var(--border)", color: "var(--foreground)" }}
-            >
-              {tenants.map((tenant) => (
-                <option key={tenant.tenant_id} value={tenant.slug}>
-                  {tenant.display_name} ({tenant.auth_mode})
-                </option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              className="w-full rounded-2xl px-4 py-4 text-sm font-semibold transition-opacity hover:opacity-90"
-              style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
-            >
-              Continue
-            </button>
-          </form>
-
-          <div className="mt-6 overflow-hidden rounded-2xl border" style={{ borderColor: "var(--border)" }}>
-            {tenants.map((tenant, index) => (
-              <div
-                key={tenant.tenant_id}
-                className="flex items-center justify-between gap-4 px-4 py-4"
-                style={{
-                  backgroundColor: index % 2 === 0 ? "var(--surface)" : "var(--surface-raised)",
-                  borderTop: index === 0 ? "none" : "1px solid var(--border)",
-                }}
-              >
-                <div>
-                  <div className="text-sm font-medium" style={{ color: "var(--foreground)" }}>
-                    {tenant.display_name}
-                  </div>
-                  <div className="mt-1 text-xs uppercase tracking-[0.18em]" style={{ color: "var(--muted-foreground)" }}>
-                    {tenant.slug}
-                  </div>
-                </div>
-                <div className="text-xs font-medium uppercase tracking-[0.18em]" style={{ color: "var(--muted-foreground)" }}>
-                  {tenant.auth_mode}
-                </div>
-              </div>
-            ))}
+      <div className="relative z-10 flex w-full max-w-md flex-col gap-8">
+        {/* Logo / Brand */}
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div
+            className="flex h-14 w-14 items-center justify-center rounded-2xl shadow-lg"
+            style={{ background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%)" }}
+          >
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+                stroke="white"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
+              Welcome to AURA
+            </h1>
+            <p className="mt-1 text-sm text-text-secondary">
+              Select your workspace to continue
+            </p>
           </div>
         </div>
+
+        {/* Tenant cards */}
+        {tenants.length === 0 ? (
+          <div className="rounded-xl border border-border-subtle bg-surface-1 p-6 text-center">
+            <p className="text-sm text-text-secondary">No workspaces available.</p>
+            <p className="mt-1 text-xs text-text-tertiary">Contact your administrator.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {tenants.map((tenant) => (
+              <TenantCard key={tenant.tenant_id} tenant={tenant} />
+            ))}
+          </div>
+        )}
+
+        {/* Footer */}
+        <p className="text-center text-xs text-text-tertiary">
+          Need help?{" "}
+          <a
+            href="mailto:support@aura.ai"
+            className="text-accent hover:text-accent-light transition-colors"
+          >
+            Contact support
+          </a>
+        </p>
       </div>
     </div>
+  );
+}
+
+function TenantCard({ tenant }: { tenant: PublicTenantInfo }) {
+  const isOkta = tenant.auth_mode === "okta";
+
+  return (
+    <Link
+      href={`/tenant/${tenant.slug}`}
+      className="group relative flex items-center gap-4 rounded-xl border border-border-subtle bg-surface-1 p-4 transition-all duration-200 hover:border-accent/40 hover:bg-surface-2 hover:shadow-md"
+    >
+      {/* Avatar */}
+      <div
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold"
+        style={{
+          background: isOkta
+            ? "linear-gradient(135deg, var(--accent-subtle), var(--accent-muted))"
+            : "linear-gradient(135deg, var(--success-subtle), rgba(34,197,94,0.2))",
+          color: isOkta ? "var(--accent)" : "var(--success)",
+        }}
+      >
+        {tenant.display_name.charAt(0).toUpperCase()}
+      </div>
+
+      {/* Info */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-text-primary">
+            {tenant.display_name}
+          </span>
+          <span
+            className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+            style={{
+              background: isOkta ? "var(--accent-subtle)" : "var(--success-subtle)",
+              color: isOkta ? "var(--accent)" : "var(--success)",
+            }}
+          >
+            {isOkta ? "SSO" : "Local"}
+          </span>
+        </div>
+        <p className="mt-0.5 truncate text-xs text-text-tertiary">{tenant.slug}</p>
+      </div>
+
+      {/* Chevron */}
+      <svg
+        className="shrink-0 text-text-tertiary transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-accent"
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </Link>
   );
 }

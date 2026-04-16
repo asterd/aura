@@ -29,6 +29,8 @@ export interface Space {
   id: string;
   name: string;
   slug: string;
+  space_type?: string;
+  visibility?: string;
 }
 
 export interface AgentSummary {

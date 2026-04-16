@@ -9,16 +9,32 @@ RUN apt-get update \
 
 COPY pyproject.toml .
 COPY alembic.ini .
+RUN python - <<'PY' >/tmp/requirements.txt
+import tomllib
+from pathlib import Path
+
+project = tomllib.loads(Path("pyproject.toml").read_text())
+for dependency in project["project"]["dependencies"]:
+    print(dependency)
+PY
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=secret,id=corporate_ca,target=/run/secrets/corporate_ca,required=false \
+    sh -lc 'if [ -f /run/secrets/corporate_ca ]; then \
+      export PIP_CERT=/run/secrets/corporate_ca REQUESTS_CA_BUNDLE=/run/secrets/corporate_ca SSL_CERT_FILE=/run/secrets/corporate_ca; \
+    fi; \
+    pip install -r /tmp/requirements.txt'
+
 COPY apps/ ./apps/
 COPY aura/ ./aura/
 COPY infra/ ./infra/
 COPY registries/ ./registries/
-
-RUN --mount=type=secret,id=corporate_ca,target=/run/secrets/corporate_ca,required=false \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=secret,id=corporate_ca,target=/run/secrets/corporate_ca,required=false \
     sh -lc 'if [ -f /run/secrets/corporate_ca ]; then \
       export PIP_CERT=/run/secrets/corporate_ca REQUESTS_CA_BUNDLE=/run/secrets/corporate_ca SSL_CERT_FILE=/run/secrets/corporate_ca; \
     fi; \
-    pip install --no-cache-dir .'
+    pip install --no-deps .'
+RUN chmod +x /app/infra/docker/api-entrypoint.sh
 
 ENV PYTHONPATH=/app
-CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/infra/docker/api-entrypoint.sh"]

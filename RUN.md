@@ -179,6 +179,18 @@ Aprire 4 terminali:
 3. `source .venv/bin/activate && arq apps.worker.worker_settings.WorkerSettings`
 4. `cd apps/web && npm run dev`
 
+Per lo stack Docker completo:
+
+```bash
+./scripts/docker-up-all.sh
+```
+
+Il rebuild non è più forzato. Se serve una ricostruzione esplicita:
+
+```bash
+./scripts/docker-up-all.sh --build
+```
+
 ## 7. Autenticazione locale
 
 Il backend protegge quasi tutti gli endpoint tramite bearer JWT. Solo `/api/v1/health` è realmente utilizzabile senza token.
